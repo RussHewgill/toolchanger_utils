@@ -14,7 +14,16 @@ pub struct App {
     #[serde(skip)]
     pub tried_startup_connection: bool,
 
+    #[serde(skip)]
+    pub tool_offsets: Vec<(f64, f64, f64)>,
+
     pub cxc_pos: Option<(f64, f64)>,
+
+    #[serde(skip)]
+    active_tool: Option<usize>,
+
+    #[serde(skip)]
+    webcam_texture: Option<egui::TextureHandle>,
 }
 
 impl App {
@@ -72,11 +81,22 @@ impl App {
                 if let Err(e) = self.klipper.as_mut().unwrap().fetch_position() {
                     self.errors.push("Failed to get position".to_string());
                 }
+
+                match self.klipper.as_mut().unwrap().get_tool_offsets() {
+                    Ok(offsets) => {
+                        self.tool_offsets = offsets;
+                    }
+                    Err(e) => {
+                        self.errors
+                            .push(format!("Failed to get tool offsets: {}", e));
+                    }
+                }
             }
 
             return;
         };
 
+        /// home
         ui.horizontal(|ui| {
             if ui.button(RichText::new("Home All").size(16.)).clicked() {
                 if let Err(e) = klipper.home_all() {
@@ -94,10 +114,13 @@ impl App {
 
         ui.separator();
 
+        /// tools
         ui.horizontal(|ui| {
             if ui.button(RichText::new("Dropoff Tool").size(16.)).clicked() {
                 if let Err(e) = klipper.dropoff_tool() {
                     self.errors.push(format!("Failed to dropoff tool: {}", e));
+                } else {
+                    self.active_tool = None;
                 }
             }
 
@@ -109,6 +132,15 @@ impl App {
                     if let Err(e) = klipper.pick_tool(t) {
                         self.errors
                             .push(format!("Failed to pick tool {}: {}", t, e));
+                    } else {
+                        self.active_tool = Some(t);
+                    }
+                    if let Some(pos) = self.cxc_pos {
+                        if let Err(e) = klipper.move_cxc(pos) {
+                            self.errors.push(format!("Failed to move to CXC: {}", e));
+                        }
+                    } else {
+                        self.errors.push("No CXC position saved".to_string());
                     }
                 }
             }
@@ -153,10 +185,16 @@ impl App {
                                 .size(16.),
                         );
 
-                        let x = x - cxc_x;
-                        let y = y - cxc_y;
+                        let (offset_x, offset_y, _) = if let Some(t) = self.active_tool {
+                            self.tool_offsets[t]
+                        } else {
+                            (0., 0., 0.)
+                        };
+
+                        let x = x - cxc_x - offset_x;
+                        let y = y - cxc_y - offset_y;
                         ui.label(
-                            RichText::new(format!("Diff from CXC: ({:.3}, {:.3})", x, y)).size(16.),
+                            RichText::new(format!("Diff from CXC: {:.3}, {:.3}", x, y)).size(16.),
                         );
                     });
                 } else {
@@ -273,6 +311,37 @@ impl App {
 
         strip
     }
+
+    fn webcam(&mut self, ui: &mut egui::Ui) {
+        let texture = match &self.webcam_texture {
+            Some(texture) => texture,
+            None => {
+                let image = egui::ColorImage::new([1280, 800], egui::Color32::from_gray(220));
+
+                let texture = ui
+                    .ctx()
+                    .load_texture("camera_texture", image, Default::default());
+
+                self.webcam_texture = Some(texture.clone());
+
+                crate::webcam::Webcam::spawn_thread(texture.clone(), 0);
+
+                &self.webcam_texture.as_ref().unwrap()
+            }
+        };
+
+        let size = egui::Vec2::new(264., 200.);
+
+        let img = egui::Image::from_texture((texture.id(), size))
+            .fit_to_exact_size(size)
+            .max_size(size)
+            // .rounding(egui::Rounding::same(4.))
+            .sense(egui::Sense::click());
+
+        let resp = ui.add(img);
+
+        //
+    }
 }
 
 impl eframe::App for App {
@@ -282,23 +351,47 @@ impl eframe::App for App {
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         // #[cfg(feature = "nope")]
-        egui::TopBottomPanel::bottom("errors")
-            // .resizable(false)
-            // .default_width(600.)
+        egui::SidePanel::right("rigth")
+            .resizable(false)
+            .default_width(400.)
             .show(ctx, |ui| {
-                ui.label("Errors");
-                if ui.button("Clear").clicked() {
-                    self.errors.clear();
+                // let Some(offsets) = self.tool_offsets else {
+                //     ui.label("No tool offsets");
+                //     return;
+                // };
+
+                if self.tool_offsets.is_empty() {
+                    ui.label("No tool offsets");
+                    return;
                 }
-                ui.group(|ui| {
-                    for error in &self.errors {
-                        ui.label(error);
-                    }
-                })
+
+                for t in 0..4 {
+                    let (x, y, z) = self.tool_offsets[t];
+
+                    ui.label(format!("Tool {} offsets:", t));
+                    ui.label(format!("X: {:.3}", x));
+                    ui.label(format!("Y: {:.3}", y));
+
+                    ui.separator();
+                }
+
+                // ui.label("Errors");
+                // if ui.button("Clear").clicked() {
+                //     self.errors.clear();
+                // }
+                // ui.group(|ui| {
+                //     for error in &self.errors {
+                //         ui.label(error);
+                //     }
+                // })
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
+            // self.webcam(ui);
+            // ui.separator();
+
             self.controls(ui);
+
             //
         });
     }

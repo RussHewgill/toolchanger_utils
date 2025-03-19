@@ -11,13 +11,14 @@
 pub mod klipper_protocol;
 pub mod logging;
 pub mod ui;
+pub mod webcam;
 
 use std::collections::HashMap;
 
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use tracing::{debug, error, info, trace, warn};
 
-#[cfg(feature = "nope")]
+// #[cfg(feature = "nope")]
 fn main() -> eframe::Result<()> {
     use ui::App;
 
@@ -36,7 +37,7 @@ fn main() -> eframe::Result<()> {
     )
 }
 
-// #[cfg(feature = "nope")]
+#[cfg(feature = "nope")]
 fn main() -> Result<()> {
     logging::init_logs();
 
@@ -45,13 +46,46 @@ fn main() -> Result<()> {
     // let url = "http://192.168.0.245/server/jsonrpc";
     let url = "http://192.168.0.245";
 
-    let mut klipper = klipper_protocol::KlipperProtocol::new(url)?;
+    // let mut klipper = klipper_protocol::KlipperProtocol::new(url)?;
+
+    // let vars = klipper.get_variables()?;
+
+    // pretty print
+
+    // let pretty_vars = serde_json::to_string_pretty(&vars)?;
+    // println!("{}", pretty_vars);
 
     // klipper.get_position()?;
 
     // klipper.home_xy()?;
 
     // klipper.run_gcode("_CLIENT_LINEAR_MOVE X=1")?;
+
+    let index = 0;
+
+    {
+        use nokhwa::{
+            pixel_format::RgbFormat,
+            utils::{RequestedFormat, RequestedFormatType},
+        };
+
+        let format =
+        // RequestedFormat::<RgbFormat>::new(RequestedFormatType::AbsoluteHighestFrameRate);
+        RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
+        let mut camera =
+            nokhwa::Camera::new(nokhwa::utils::CameraIndex::Index(index as u32), format).unwrap();
+
+        let Ok(frame) = camera.frame() else {
+            eprintln!("Failed to get frame");
+            return Ok(());
+        };
+
+        let res = frame.resolution();
+
+        debug!("Got frame: {}x{}", res.width(), res.height());
+
+        //
+    }
 
     Ok(())
 }

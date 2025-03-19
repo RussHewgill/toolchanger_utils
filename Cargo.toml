@@ -30,5 +30,8 @@ eframe = { version = "0.31.1", features = ["persistence"] }
 egui_extras = "0.31.1"
 
 bytemuck_derive = ">=1.8.1, <1.9.0"
+# nokhwa = { version = "0.10.7", features = ["input-native", "output-wgpu"] }
+nokhwa = { version = "0.10.7", features = ["input-native"] }
+# egui-wgpu = "0.31.1"
 
 # tokio = { version = "1.44.1", features = ["full"] }

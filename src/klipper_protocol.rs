@@ -94,6 +94,9 @@ impl KlipperProtocol {
         let x = pos.0;
         let y = pos.1;
 
+        let gcode = format!("G1 X{} Y{}", x - 0.5, y - 0.5);
+        self.run_gcode(&gcode, false)?;
+
         let gcode = format!("G1 X{} Y{}", x, y);
         self.run_gcode(&gcode, true)?;
         Ok(())
@@ -112,10 +115,16 @@ impl KlipperProtocol {
         if bounce {
             let bounce_amount = 0.5;
 
+            // let (m0, m1) = if amount > 0.0 {
+            //     (-bounce_amount, bounce_amount + amount)
+            // } else {
+            //     (bounce_amount, amount - bounce_amount)
+            // };
+
             let (m0, m1) = if amount > 0.0 {
                 (-bounce_amount, bounce_amount + amount)
             } else {
-                (bounce_amount, amount - bounce_amount)
+                (-bounce_amount, bounce_amount + amount)
             };
 
             // let m0 = -amount.signum() * bounce_amount;
@@ -152,6 +161,51 @@ impl KlipperProtocol {
         let gcode = "T_1";
         self.run_gcode(&gcode, true)?;
         Ok(())
+    }
+
+    pub fn get_tool_offsets(&self) -> Result<Vec<(f64, f64, f64)>> {
+        let vars = self.get_variables()?;
+
+        let vars = &vars["result"]["status"]["save_variables"]["variables"];
+
+        let mut offsets = Vec::new();
+
+        for t in 0..4 {
+            let x = vars[&format!("t{}_x_offset", t)]
+                .as_f64()
+                .ok_or_else(|| anyhow!("Failed to parse tool {} x offset", t))?;
+            let y = vars[&format!("t{}_y_offset", t)]
+                .as_f64()
+                .ok_or_else(|| anyhow!("Failed to parse tool {} y offset", t))?;
+            let z = vars[&format!("t{}_z_offset", t)]
+                .as_f64()
+                .ok_or_else(|| anyhow!("Failed to parse tool {} z offset", t))?;
+            offsets.push((x, y, z));
+        }
+
+        Ok(offsets)
+    }
+
+    fn get_variables(&self) -> Result<Value> {
+        let url = format!("{}/printer/objects/query", self.url);
+
+        let map = serde_json::json!({
+            "objects": {
+                "save_variables": null
+            }
+        });
+
+        let res = self
+            .client
+            .post(url)
+            .header("Content-Type", "application/json")
+            .json(&map)
+            .send()
+            .context("Failed to send request")?;
+
+        let json = res.json::<Value>().context("Failed to parse response")?;
+
+        Ok(json)
     }
 
     // fn run_gcode(&mut self, gcode: &str) -> Result<()> {
