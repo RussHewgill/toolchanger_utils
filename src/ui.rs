@@ -1,7 +1,8 @@
 use anyhow::{anyhow, bail, ensure, Context, Result};
+use tracing::{debug, error, info, trace, warn};
+
 use egui::RichText;
 use egui_extras::StripBuilder;
-use tracing::{debug, error, info, trace, warn};
 
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 pub struct App {
@@ -17,13 +18,49 @@ pub struct App {
     #[serde(skip)]
     pub tool_offsets: Vec<(f64, f64, f64)>,
 
-    pub cxc_pos: Option<(f64, f64)>,
+    pub camera_pos: Option<(f64, f64)>,
 
     #[serde(skip)]
     active_tool: Option<usize>,
 
     #[serde(skip)]
     webcam_texture: Option<egui::TextureHandle>,
+
+    crosshair_circle_size: std::sync::Arc<std::sync::atomic::AtomicU32>,
+
+    #[serde(skip)]
+    pub offset_axis: Axis,
+
+    #[serde(skip)]
+    pub offset_value: f64,
+
+    #[serde(skip)]
+    pub current_tab: Tab,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, PartialOrd)]
+pub enum Tab {
+    Webcam,
+    Options,
+}
+
+impl Default for Tab {
+    fn default() -> Self {
+        Tab::Webcam
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, PartialOrd)]
+pub enum Axis {
+    X,
+    Y,
+    Z,
+}
+
+impl Default for Axis {
+    fn default() -> Self {
+        Axis::X
+    }
 }
 
 impl App {
@@ -125,22 +162,26 @@ impl App {
             }
 
             for t in 0..4 {
-                if ui
-                    .button(RichText::new(format!("T{}", t)).size(16.))
-                    .clicked()
-                {
+                let but = egui::Button::new(RichText::new(format!("T{}", t)).size(16.));
+                let but = if self.active_tool == Some(t) {
+                    but.fill(egui::Color32::from_rgb(50, 158, 244))
+                } else {
+                    but
+                };
+
+                if ui.add(but).clicked() {
                     if let Err(e) = klipper.pick_tool(t) {
                         self.errors
                             .push(format!("Failed to pick tool {}: {}", t, e));
                     } else {
                         self.active_tool = Some(t);
                     }
-                    if let Some(pos) = self.cxc_pos {
-                        if let Err(e) = klipper.move_cxc(pos) {
-                            self.errors.push(format!("Failed to move to CXC: {}", e));
+                    if let Some(pos) = self.camera_pos {
+                        if let Err(e) = klipper.move_camera(pos) {
+                            self.errors.push(format!("Failed to move to camera: {}", e));
                         }
                     } else {
-                        self.errors.push("No CXC position saved".to_string());
+                        self.errors.push("No camera position saved".to_string());
                     }
                 }
             }
@@ -149,40 +190,44 @@ impl App {
 
         ui.separator();
 
+        /// Camera Offset
         ui.horizontal(|ui| {
             if let Some((x, y, z)) = klipper.get_position() {
                 if ui
                     .add(
-                        egui::Button::new(RichText::new("Save CXC Position").size(16.))
+                        egui::Button::new(RichText::new("Save camera Position").size(16.))
                             .fill(egui::Color32::from_rgb(251, 149, 20)),
                     )
                     .clicked()
                 {
-                    self.cxc_pos = Some((x, y));
-                    // klipper.set_cxc_pos(x, y);
+                    self.camera_pos = Some((x, y));
+                    // klipper.set_camera_pos(x, y);
                 }
 
                 if ui
                     .add(
-                        egui::Button::new(RichText::new("Move to CXC").size(16.))
+                        egui::Button::new(RichText::new("Move to camera").size(16.))
                             .fill(egui::Color32::from_rgb(50, 158, 244)),
                     )
                     .clicked()
                 {
-                    if let Some(pos) = self.cxc_pos {
-                        if let Err(e) = klipper.move_cxc(pos) {
-                            self.errors.push(format!("Failed to move to CXC: {}", e));
+                    if let Some(pos) = self.camera_pos {
+                        if let Err(e) = klipper.move_camera(pos) {
+                            self.errors.push(format!("Failed to move to camera: {}", e));
                         }
                     } else {
-                        self.errors.push("No CXC position saved".to_string());
+                        self.errors.push("No camera position saved".to_string());
                     }
                 }
 
-                if let Some((cxc_x, cxc_y)) = self.cxc_pos {
+                if let Some((camera_x, camera_y)) = self.camera_pos {
                     ui.horizontal(|ui| {
                         ui.label(
-                            RichText::new(format!("CXC Position: ({:.2}, {:.2})", cxc_x, cxc_y))
-                                .size(16.),
+                            RichText::new(format!(
+                                "Camera Position: ({:.2}, {:.2})",
+                                camera_x, camera_y
+                            ))
+                            .size(16.),
                         );
 
                         let (offset_x, offset_y, _) = if let Some(t) = self.active_tool {
@@ -191,21 +236,22 @@ impl App {
                             (0., 0., 0.)
                         };
 
-                        let x = x - cxc_x - offset_x;
-                        let y = y - cxc_y - offset_y;
+                        let x = x - camera_x - offset_x;
+                        let y = y - camera_y - offset_y;
                         ui.label(
-                            RichText::new(format!("Diff from CXC: {:.3}, {:.3}", x, y)).size(16.),
+                            RichText::new(format!("Diff from Camera: {:.3}, {:.3}", x, y))
+                                .size(16.),
                         );
                     });
                 } else {
-                    ui.label(RichText::new(format!("No CXC Position")).size(16.));
+                    ui.label(RichText::new(format!("No Camera Position")).size(16.));
                 }
             };
         });
 
         ui.separator();
 
-        let steps = [0.02, 0.1, 0.5, 1., 5.];
+        let steps = [0.01, 0.1, 0.5, 1., 5.];
 
         let Some((x, y, z)) = klipper.get_position() else {
             ui.label("No position");
@@ -312,6 +358,125 @@ impl App {
         strip
     }
 
+    fn offset_adjust(&mut self, ui: &mut egui::Ui) {
+        let Some(tool) = self.active_tool else {
+            ui.label("No active tool");
+            return;
+        };
+
+        let (offset_x, offset_y, offset_z) = self.tool_offsets[tool];
+
+        ui.horizontal(|ui| {
+            ui.label(format!("Tool {} offsets:", tool));
+            ui.label(format!("X: {:.3}", offset_x));
+            ui.label(format!("Y: {:.3}", offset_y));
+            ui.label(format!("Z: {:.3}", offset_z));
+        });
+
+        ui.separator();
+
+        ui.horizontal(|ui| {
+            ui.label("Adjust:");
+            ui.radio_value(&mut self.offset_axis, Axis::X, "X");
+            ui.radio_value(&mut self.offset_axis, Axis::Y, "Y");
+            // ui.radio_value(&mut self.offset_axis, Axis::Z, "Z");
+        });
+
+        ui.separator();
+
+        ui.horizontal(|ui| {
+            ui.label("Offset:");
+            ui.add(
+                egui::DragValue::new(&mut self.offset_value)
+                    .range(-0.1..=0.1)
+                    .speed(0.01)
+                    .fixed_decimals(3),
+            );
+        });
+
+        ui.separator();
+
+        ui.horizontal(|ui| {
+            let Some(klipper) = self.klipper.as_mut() else {
+                ui.label("No Klipper connection");
+                return;
+            };
+
+            if ui.button("Apply").clicked() {
+                let axis = match self.offset_axis {
+                    Axis::X => 0,
+                    Axis::Y => 1,
+                    Axis::Z => 2,
+                };
+
+                if let Err(e) = klipper.adjust_tool_offset(tool, axis, self.offset_value) {
+                    self.errors
+                        .push(format!("Failed to adjust tool {} offset: {}", tool, e));
+                } else {
+                    match axis {
+                        0 => {
+                            self.tool_offsets[tool].0 += self.offset_value;
+                        }
+                        1 => {
+                            self.tool_offsets[tool].1 += self.offset_value;
+                        }
+                        // 2 => {
+                        //     self.tool_offsets[tool].2 += self.offset_value;
+                        // }
+                        _ => {}
+                    }
+                }
+
+                //
+            }
+
+            if ui
+                .add(
+                    egui::Button::new("Apply offset from camera")
+                        .fill(egui::Color32::from_rgb(50, 158, 244)),
+                )
+                .clicked()
+            {
+                if let Some((camera_x, camera_y)) = self.camera_pos {
+                    let (offset_x, offset_y, _) = if let Some(tool) = self.active_tool {
+                        self.tool_offsets[tool]
+                    } else {
+                        (0., 0., 0.)
+                    };
+
+                    let (x, y, _) = klipper.get_position().unwrap_or((0., 0., 0.));
+
+                    let x = x - camera_x - offset_x;
+                    let y = y - camera_y - offset_y;
+
+                    debug!("Applying offsets from camera: ({:.3}, {:.3})", x, y);
+
+                    if let Err(e) = klipper.adjust_tool_offset(tool, 0, x) {
+                        self.errors
+                            .push(format!("Failed to adjust tool {} offset: {}", tool, e));
+                    } else {
+                        self.tool_offsets[tool].0 += x;
+                    }
+
+                    if let Err(e) = klipper.adjust_tool_offset(tool, 1, y) {
+                        self.errors
+                            .push(format!("Failed to adjust tool {} offset: {}", tool, e));
+                    } else {
+                        self.tool_offsets[tool].1 += y;
+                    }
+
+                    let cam_pos = self.camera_pos.unwrap();
+                    if let Err(e) = klipper.move_camera(cam_pos) {
+                        self.errors.push(format!("Failed to move camera: {}", e));
+                    }
+
+                    //
+                }
+            }
+        });
+        //
+    }
+
     fn webcam(&mut self, ui: &mut egui::Ui) {
         let texture = match &self.webcam_texture {
             Some(texture) => texture,
@@ -324,13 +489,23 @@ impl App {
 
                 self.webcam_texture = Some(texture.clone());
 
-                crate::webcam::Webcam::spawn_thread(texture.clone(), 0);
+                // crate::webcam::Webcam::spawn_thread(
+                //     ui.ctx().clone(),
+                //     texture.clone(),
+                //     0,
+                //     self.crosshair_circle_size.clone(),
+                // );
+
+                crate::vision::spawn_locator_thread(ui.ctx().clone(), texture.clone(), 0);
 
                 &self.webcam_texture.as_ref().unwrap()
             }
         };
 
-        let size = egui::Vec2::new(264., 200.);
+        let size = egui::Vec2::new(
+            crate::webcam::Webcam::SIZE.0 as f32,
+            crate::webcam::Webcam::SIZE.1 as f32,
+        );
 
         let img = egui::Image::from_texture((texture.id(), size))
             .fit_to_exact_size(size)
@@ -339,6 +514,18 @@ impl App {
             .sense(egui::Sense::click());
 
         let resp = ui.add(img);
+
+        // ui.add(egui::Slider::from_get_set(0.0..=100.0, |v| {
+        //     if let Some(v) = v {
+        //         let v2 = self
+        //             .crosshair_circle_size
+        //             .store(v as u32, std::sync::atomic::Ordering::SeqCst);
+        //         v
+        //     } else {
+        //         self.crosshair_circle_size
+        //             .load(std::sync::atomic::Ordering::SeqCst) as f64
+        //     }
+        // }));
 
         //
     }
@@ -350,49 +537,80 @@ impl eframe::App for App {
     }
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        // #[cfg(feature = "nope")]
-        egui::SidePanel::right("rigth")
-            .resizable(false)
-            .default_width(400.)
-            .show(ctx, |ui| {
-                // let Some(offsets) = self.tool_offsets else {
-                //     ui.label("No tool offsets");
-                //     return;
-                // };
+        // if cfg!(debug_assertions) && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        //     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        // }
 
-                if self.tool_offsets.is_empty() {
-                    ui.label("No tool offsets");
-                    return;
-                }
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
 
-                for t in 0..4 {
-                    let (x, y, z) = self.tool_offsets[t];
-
-                    ui.label(format!("Tool {} offsets:", t));
-                    ui.label(format!("X: {:.3}", x));
-                    ui.label(format!("Y: {:.3}", y));
-
-                    ui.separator();
-                }
-
-                // ui.label("Errors");
-                // if ui.button("Clear").clicked() {
-                //     self.errors.clear();
-                // }
-                // ui.group(|ui| {
-                //     for error in &self.errors {
-                //         ui.label(error);
-                //     }
-                // })
-            });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            // self.webcam(ui);
-            // ui.separator();
-
-            self.controls(ui);
-
-            //
+        egui::TopBottomPanel::top("tabs").show(ctx, |ui| {
+            ui.selectable_value(&mut self.current_tab, Tab::Webcam, "Webcam");
+            ui.selectable_value(&mut self.current_tab, Tab::Options, "Options");
         });
+
+        match self.current_tab {
+            Tab::Webcam => {
+                // #[cfg(feature = "nope")]
+                egui::SidePanel::right("rigth")
+                    .resizable(false)
+                    .default_width(400.)
+                    .show(ctx, |ui| {
+                        // let Some(offsets) = self.tool_offsets else {
+                        //     ui.label("No tool offsets");
+                        //     return;
+                        // };
+
+                        if self.tool_offsets.is_empty() {
+                            ui.label("No tool offsets");
+                            return;
+                        }
+
+                        for t in 0..4 {
+                            let (x, y, z) = self.tool_offsets[t];
+
+                            ui.label(format!("Tool {} offsets:", t));
+                            ui.label(format!("X: {:.3}", x));
+                            ui.label(format!("Y: {:.3}", y));
+
+                            ui.separator();
+                        }
+
+                        // ui.label("Errors");
+                        // if ui.button("Clear").clicked() {
+                        //     self.errors.clear();
+                        // }
+                        // ui.group(|ui| {
+                        //     for error in &self.errors {
+                        //         ui.label(error);
+                        //     }
+                        // })
+                    });
+
+                egui::TopBottomPanel::bottom("bottom")
+                    .resizable(false)
+                    .default_height(200.)
+                    .show(ctx, |ui| {
+                        self.offset_adjust(ui);
+                    });
+
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        self.webcam(ui);
+                    });
+                    ui.separator();
+
+                    ui.vertical_centered(|ui| {
+                        self.controls(ui);
+                    });
+
+                    //
+                });
+            }
+            Tab::Options => {
+                self.options(ctx);
+            }
+        }
     }
 }

@@ -11,7 +11,7 @@ pub struct KlipperProtocol {
     id: AtomicU32,
 
     position: Option<(f64, f64, f64)>,
-    // cxc_pos: Option<(f64, f64)>,
+    // camera_pos: Option<(f64, f64)>,
 }
 
 impl KlipperProtocol {
@@ -28,7 +28,7 @@ impl KlipperProtocol {
             id: AtomicU32::new(1),
 
             position: None,
-            // cxc_pos: None,
+            // camera_pos: None,
         })
     }
 
@@ -87,7 +87,7 @@ impl KlipperProtocol {
         Ok((x, y, z))
     }
 
-    pub fn move_cxc(&mut self, pos: (f64, f64)) -> Result<()> {
+    pub fn move_camera(&mut self, pos: (f64, f64)) -> Result<()> {
         let gcode = "G1 Z30";
         self.run_gcode(&gcode, false)?;
 
@@ -184,6 +184,24 @@ impl KlipperProtocol {
         }
 
         Ok(offsets)
+    }
+
+    pub fn adjust_tool_offset(&mut self, tool: usize, axis: usize, amount: f64) -> Result<()> {
+        let axis = match axis {
+            0 => "X",
+            1 => "Y",
+            // 2 => "Z",
+            _ => bail!("Invalid axis"),
+        };
+
+        let gcode = format!(
+            "TC_ADJUST_OFFSET TOOL={} AXIS={} AMOUNT={}",
+            tool, axis, amount
+        );
+
+        self.run_gcode(&gcode, true)?;
+
+        Ok(())
     }
 
     fn get_variables(&self) -> Result<Value> {

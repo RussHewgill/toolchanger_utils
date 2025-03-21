@@ -5,18 +5,37 @@
 #![allow(unused_doc_comments)]
 #![allow(unused_labels)]
 #![allow(unexpected_cfgs)]
-// #![windows_subsystem = "windows"]
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// // #![windows_subsystem = "windows"]
+// #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 pub mod klipper_protocol;
 pub mod logging;
+pub mod options;
 pub mod ui;
+pub mod vision;
 pub mod webcam;
 
 use std::collections::HashMap;
 
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use tracing::{debug, error, info, trace, warn};
+
+#[cfg(feature = "nope")]
+fn main() -> opencv::Result<()> {
+    logging::init_logs();
+    debug!("Init");
+
+    let path = "frame_centered.jpg";
+    // let path = "frame_up.jpg";
+
+    // vision::opencv_test()?;
+
+    let pos = vision::locate_nozzle(&path)?;
+
+    debug!("Position: {:?}", pos);
+
+    Ok(())
+}
 
 // #[cfg(feature = "nope")]
 fn main() -> eframe::Result<()> {
