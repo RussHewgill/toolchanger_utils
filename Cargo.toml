@@ -36,5 +36,12 @@ nokhwa = { version = "0.10.7", features = ["input-native"] }
 
 image = { version = "0.25", default-features = false }
 opencv = "0.94.3"
+crossbeam-channel = "0.5.14"
+
+# egui_struct = "0.4.2"
+# rust-i18n = "3.1.3"
+
+# enum2egui = "0.3.11"
+# egui-probe = { version = "0.8.0", features = ["derive"] }
 
 # tokio = { version = "1.44.1", features = ["full"] }

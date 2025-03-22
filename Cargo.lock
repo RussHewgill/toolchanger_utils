@@ -3972,6 +3972,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytemuck_derive",
+ "crossbeam-channel",
  "eframe",
  "egui",
  "egui_extras",

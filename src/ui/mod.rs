@@ -1,68 +1,16 @@
+pub mod ui_types;
+
+use ui_types::*;
+
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use tracing::{debug, error, info, trace, warn};
 
 use egui::RichText;
 use egui_extras::StripBuilder;
 
-#[derive(serde::Serialize, serde::Deserialize, Default)]
-pub struct App {
-    #[serde(skip)]
-    pub klipper: Option<crate::klipper_protocol::KlipperProtocol>,
+use crate::vision::WebcamSettings;
 
-    #[serde(skip)]
-    pub errors: Vec<String>,
-
-    #[serde(skip)]
-    pub tried_startup_connection: bool,
-
-    #[serde(skip)]
-    pub tool_offsets: Vec<(f64, f64, f64)>,
-
-    pub camera_pos: Option<(f64, f64)>,
-
-    #[serde(skip)]
-    active_tool: Option<usize>,
-
-    #[serde(skip)]
-    webcam_texture: Option<egui::TextureHandle>,
-
-    crosshair_circle_size: std::sync::Arc<std::sync::atomic::AtomicU32>,
-
-    #[serde(skip)]
-    pub offset_axis: Axis,
-
-    #[serde(skip)]
-    pub offset_value: f64,
-
-    #[serde(skip)]
-    pub current_tab: Tab,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, PartialOrd)]
-pub enum Tab {
-    Webcam,
-    Options,
-}
-
-impl Default for Tab {
-    fn default() -> Self {
-        Tab::Webcam
-    }
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, PartialOrd)]
-pub enum Axis {
-    X,
-    Y,
-    Z,
-}
-
-impl Default for Axis {
-    fn default() -> Self {
-        Axis::X
-    }
-}
-
+/// New
 impl App {
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -74,6 +22,10 @@ impl App {
         } else {
             Default::default()
         };
+
+        let mut webcam_settings = out.webcam_settings_mutex.lock().unwrap();
+        *webcam_settings = out.webcam_settings;
+        drop(webcam_settings);
 
         // out.list_sort = Some((0, history_tab::SortOrder::Descending));
 
@@ -97,6 +49,7 @@ impl App {
     }
 }
 
+/// controls
 impl App {
     fn controls(&mut self, ui: &mut egui::Ui) {
         let Some(klipper) = &mut self.klipper else {
@@ -478,56 +431,212 @@ impl App {
     }
 
     fn webcam(&mut self, ui: &mut egui::Ui) {
-        let texture = match &self.webcam_texture {
-            Some(texture) => texture,
-            None => {
-                let image = egui::ColorImage::new([1280, 800], egui::Color32::from_gray(220));
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                egui::Grid::new("Filter Controls").show(ui, |ui| {
+                    if ui.button("Clear Running Average").clicked() {
+                        self.running_average.clear();
+                    }
+                    ui.end_row();
 
-                let texture = ui
-                    .ctx()
-                    .load_texture("camera_texture", image, Default::default());
+                    let (confidence, result) = self.running_average.get_result();
+                    // let confidence = self.running_average.calculate_confidence();
+                    ui.label(format!("Confidence: {:.3}", confidence));
+                    ui.end_row();
+                    if let Some(result) = result {
+                        ui.label(format!("Result: ({:.3}, {:.3})", result.0, result.1));
+                    } else {
+                        ui.label("Result: None");
+                    }
 
-                self.webcam_texture = Some(texture.clone());
+                    ui.end_row();
 
-                // crate::webcam::Webcam::spawn_thread(
-                //     ui.ctx().clone(),
-                //     texture.clone(),
-                //     0,
-                //     self.crosshair_circle_size.clone(),
-                // );
+                    ui.separator();
+                    ui.end_row();
 
-                crate::vision::spawn_locator_thread(ui.ctx().clone(), texture.clone(), 0);
+                    self.webcam_controls(ui);
+                });
+            });
 
-                &self.webcam_texture.as_ref().unwrap()
-            }
-        };
+            let texture = match &self.webcam_texture {
+                Some(texture) => texture,
+                None => {
+                    let image = egui::ColorImage::new([1280, 800], egui::Color32::from_gray(220));
 
-        let size = egui::Vec2::new(
-            crate::webcam::Webcam::SIZE.0 as f32,
-            crate::webcam::Webcam::SIZE.1 as f32,
+                    let texture =
+                        ui.ctx()
+                            .load_texture("camera_texture", image, Default::default());
+
+                    self.webcam_texture = Some(texture.clone());
+
+                    // crate::webcam::Webcam::spawn_thread(
+                    //     ui.ctx().clone(),
+                    //     texture.clone(),
+                    //     0,
+                    //     self.crosshair_circle_size.clone(),
+                    // );
+
+                    let (tx, rx) = crossbeam_channel::unbounded();
+
+                    self.channel_to_ui = Some(rx);
+
+                    crate::vision::spawn_locator_thread(
+                        ui.ctx().clone(),
+                        texture.clone(),
+                        0,
+                        tx,
+                        self.webcam_settings_mutex.clone(),
+                    );
+
+                    &self.webcam_texture.as_ref().unwrap()
+                }
+            };
+
+            let size = egui::Vec2::new(
+                crate::webcam::Webcam::SIZE.0 as f32,
+                crate::webcam::Webcam::SIZE.1 as f32,
+                // 640., 480.,
+            );
+            // let size = size / 1.;
+            let size = size / 2.;
+
+            let img = egui::Image::from_texture((texture.id(), size))
+                .fit_to_exact_size(size)
+                .max_size(size)
+                // .rounding(egui::Rounding::same(4.))
+                .sense(egui::Sense::click());
+
+            let resp = ui.add(img);
+        });
+        //
+    }
+
+    #[cfg(feature = "nope")]
+    fn webcam_controls(&mut self, ui: &mut egui::Ui) {
+        egui_probe::Probe::new(&mut self.webcam_settings).show(ui);
+
+        if self.webcam_settings != self.webcam_settings_prev {
+            let mut settings = self.webcam_settings_mutex.lock().unwrap();
+            *settings = self.webcam_settings;
+            self.webcam_settings_prev = self.webcam_settings.clone();
+        }
+    }
+
+    fn webcam_controls(&mut self, ui: &mut egui::Ui) {
+        ui.label("Filter Step");
+        let resp = ui.add(
+            egui::Slider::new(
+                &mut self.webcam_settings.filter_step,
+                0..=WebcamSettings::NUM_FILTER_STEPS,
+            )
+            .integer(),
         );
 
-        let img = egui::Image::from_texture((texture.id(), size))
-            .fit_to_exact_size(size)
-            .max_size(size)
-            // .rounding(egui::Rounding::same(4.))
-            .sense(egui::Sense::click());
+        if resp.hovered() {
+            let delta = ui.input(|i| {
+                i.events.iter().find_map(|e| match e {
+                    egui::Event::MouseWheel {
+                        unit: _,
+                        delta,
+                        modifiers,
+                    } => Some(*delta),
+                    _ => None,
+                })
+            });
+            if let Some(delta) = delta {
+                if delta.y > 0. {
+                    self.webcam_settings.filter_step += 1;
+                } else if delta.y < 0. {
+                    self.webcam_settings.filter_step -= 1;
+                }
+            }
+        }
+        ui.end_row();
 
-        let resp = ui.add(img);
+        // ui.label("Threshold");
+        // ui.add(egui::Slider::new(
+        //     &mut self.webcam_settings.threshold,
+        //     0..=100,
+        // ));
+        // ui.end_row();
 
-        // ui.add(egui::Slider::from_get_set(0.0..=100.0, |v| {
-        //     if let Some(v) = v {
-        //         let v2 = self
-        //             .crosshair_circle_size
-        //             .store(v as u32, std::sync::atomic::Ordering::SeqCst);
-        //         v
-        //     } else {
-        //         self.crosshair_circle_size
-        //             .load(std::sync::atomic::Ordering::SeqCst) as f64
-        //     }
-        // }));
+        ui.label("Use Adaptive Threshold");
+        ui.checkbox(&mut self.webcam_settings.adaptive_threshold, "");
+        ui.end_row();
 
-        //
+        ui.label("Adaptive Threshold Block Size");
+        let resp = ui.add(
+            egui::DragValue::new(&mut self.webcam_settings.adaptive_threshold_block_size)
+                .speed(1.0)
+                .fixed_decimals(0),
+            // egui::Slider::new(
+            //     &mut self.webcam_settings.adaptive_threshold_block_size,
+            //     1..=100,
+            // )
+            // // .step_by(2.0)
+            // .custom_formatter(|n, _| format!("{}", n * 2. + 1.)),
+        );
+        if resp.hovered() {
+            let delta = ui.input(|i| {
+                i.events.iter().find_map(|e| match e {
+                    egui::Event::MouseWheel {
+                        unit: _,
+                        delta,
+                        modifiers,
+                    } => Some(*delta),
+                    _ => None,
+                })
+            });
+            if let Some(delta) = delta {
+                if delta.y > 0. {
+                    self.webcam_settings.adaptive_threshold_block_size += 2;
+                } else if delta.y < 0. {
+                    self.webcam_settings.adaptive_threshold_block_size -= 2;
+                }
+            }
+        }
+        ui.end_row();
+
+        ui.label("Adaptive Threshold C");
+        ui.add(
+            egui::DragValue::new(&mut self.webcam_settings.adaptive_threshold_c)
+                .speed(0.1)
+                .fixed_decimals(1),
+        );
+        ui.end_row();
+
+        ui.label("Blur Kernel Size");
+        ui.add(
+            egui::DragValue::new(&mut self.webcam_settings.blur_kernel_size)
+                .speed(1.0)
+                .fixed_decimals(0),
+        );
+        ui.end_row();
+
+        ui.label("Blur Sigma");
+        ui.add(
+            egui::DragValue::new(&mut self.webcam_settings.blur_sigma)
+                .speed(0.1)
+                .fixed_decimals(1),
+        );
+
+        ui.end_row();
+
+        ui.label("Draw Circle");
+        ui.checkbox(&mut self.webcam_settings.draw_circle, "");
+
+        ui.end_row();
+
+        ui.label("Use Hough");
+        ui.checkbox(&mut self.webcam_settings.use_hough, "");
+
+        ui.end_row();
+
+        if self.webcam_settings != self.webcam_settings_prev {
+            let mut settings = self.webcam_settings_mutex.lock().unwrap();
+            *settings = self.webcam_settings;
+            self.webcam_settings_prev = self.webcam_settings.clone();
+        }
     }
 }
 
@@ -543,6 +652,22 @@ impl eframe::App for App {
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+
+        if let Some(rx) = self.channel_to_ui.as_mut() {
+            while let Ok(msg) = rx.try_recv() {
+                match msg {
+                    crate::vision::WebcamMessage::FoundNozzle(pos) => {
+                        // debug!("Found nozzle: {:?}", pos);
+                        // self.running_average.push_position((pos.0, pos.1));
+                        self.running_average.add_frame(Some(pos));
+                    }
+                    crate::vision::WebcamMessage::NozzleNotFound => {
+                        // debug!("Nozzle not found");
+                        self.running_average.add_frame(None)
+                    }
+                }
+            }
         }
 
         egui::TopBottomPanel::top("tabs").show(ctx, |ui| {

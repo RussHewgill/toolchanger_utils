@@ -12,14 +12,16 @@ pub struct Webcam {
 }
 
 impl Webcam {
-    pub const SIZE: (u32, u32) = (640, 480);
+    // pub const SIZE: (u32, u32) = (640, 480);
     // pub const SIZE: (u32, u32) = (320, 240);
+    pub const SIZE: (u32, u32) = (1280, 800);
 
     pub fn spawn_thread(
         ctx: egui::Context,
         mut handle: egui::TextureHandle,
         index: usize,
         crosshair_size: std::sync::Arc<std::sync::atomic::AtomicU32>,
+        // channel_to_ui: (),
         //
     ) {
         std::thread::spawn(move || {

@@ -11,3 +11,4 @@ debug_output*
 preview*.png
 *.model/target
 *.jpg
+test_images/*
