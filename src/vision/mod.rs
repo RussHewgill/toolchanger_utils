@@ -85,7 +85,8 @@ pub fn spawn_locator_thread(ctx: egui::Context, mut handle: egui::TextureHandle,
 
         eprintln!("Starting camera loop");
         loop {
-            std::thread::sleep(std::time::Duration::from_millis(100));
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            // std::thread::sleep(std::time::Duration::from_millis(1000));
 
             let Ok(frame) = camera.frame() else {
                 eprintln!("Failed to get frame");
@@ -137,20 +138,119 @@ pub fn locate_nozzle(img0: &mut image::ImageBuffer<image::Rgb<u8>, Vec<u8>>) -> 
         )?
     };
 
-    // let mut img2 = img.clone();
+    let mut img_out = img.clone();
+
+    let mut img2 = img.clone();
 
     // debug!("img2 dimensions: {:?}", img2.size()?);
     // debug!("img2 channels: {:?}", img2.channels());
 
-    // cvt_color(
-    //     &img,
-    //     &mut img2,
-    //     // COLOR_BGR2GRAY,
-    //     opencv::imgproc::COLOR_RGB2YUV,
-    //     0,
-    //     opencv::core::AlgorithmHint::ALGO_HINT_DEFAULT,
-    // )
-    // .unwrap();
+    cvt_color(
+        &img,
+        &mut img2,
+        // COLOR_BGR2GRAY,
+        opencv::imgproc::COLOR_RGB2YUV,
+        0,
+        opencv::core::AlgorithmHint::ALGO_HINT_DEFAULT,
+    )
+    .unwrap();
+
+    // extract Luma channel
+    let mut yuv = Vector::<Mat>::new();
+    opencv::core::split(&img2, &mut yuv)?;
+    let y = yuv.get(0).unwrap();
+    img2 = y.clone();
+
+    // Apply Gaussian blur to reduce noise
+    gaussian_blur(
+        &img2,
+        &mut img,
+        Size::new(7, 7),
+        1.5,
+        1.5,
+        opencv::core::BorderTypes::BORDER_REPLICATE.into(),
+        opencv::core::AlgorithmHint::ALGO_HINT_DEFAULT,
+    )?;
+
+    let thresh = 50.;
+    // let thresh = 30.;
+
+    // Threshold to isolate dark regions (nozzle)
+    opencv::imgproc::adaptive_threshold(
+        &img,
+        &mut img2,
+        255.,
+        opencv::imgproc::ADAPTIVE_THRESH_GAUSSIAN_C.into(),
+        ThresholdTypes::THRESH_BINARY.into(),
+        35,
+        1.,
+    )?;
+
+    // Detect circles using Hough Transform
+    let mut circles: Vector<Vec3f> = Vector::new();
+    hough_circles(
+        &img2,
+        &mut circles,
+        HOUGH_GRADIENT,
+        1.0,   // dp (inverse ratio of accumulator resolution)
+        20.0,  // min_dist between circle centers
+        100.0, // param1 (upper Canny edge threshold)
+        30.0,  // param2 (accumulator threshold)
+        20,    // min_radius
+        50,    // max_radius
+    )?;
+
+    // debug!("Circles detected: {}", circles.len());
+
+    // Filter and select the best candidate
+    let (img_w, img_h) = (img.cols() as f32, img.rows() as f32);
+    let (center_x, center_y) = (img_w / 2.0, img_h / 2.0);
+    let mut best_circle: Option<opencv::core::Vec3f> = None;
+    const RADIUS_RANGE: (f32, f32) = (10.0, 50.0);
+
+    for circle in circles.iter() {
+        let radius = circle[2];
+        if radius < RADIUS_RANGE.0 || radius > RADIUS_RANGE.1 {
+            continue;
+        }
+
+        // Prefer circles closer to the center if similar size
+        let current_center_dist =
+            ((circle[0] - center_x).powi(2) + (circle[1] - center_y).powi(2)).sqrt();
+        if let Some(best) = best_circle {
+            let best_center_dist =
+                ((best[0] - center_x).powi(2) + (best[1] - center_y).powi(2)).sqrt();
+            if radius > best[2] || (radius == best[2] && current_center_dist < best_center_dist) {
+                best_circle = Some(circle);
+            }
+        } else {
+            best_circle = Some(circle);
+        }
+    }
+
+    if let Some(circle) = best_circle {
+        // let gray = img.clone();
+        // cvt_color(
+        //     &gray,
+        //     &mut img2,
+        //     // COLOR_BGR2GRAY,
+        //     opencv::imgproc::COLOR_GRAY2RGB,
+        //     0,
+        //     opencv::core::AlgorithmHint::ALGO_HINT_DEFAULT,
+        // )
+        // .unwrap();
+
+        // Draw the detected circle
+        let center = opencv::core::Point::new(circle[0] as i32, circle[1] as i32);
+        // let center = opencv::core::Point::new(322, 241);
+        // let radius = circle[2] as i32;
+        let radius = 20;
+
+        let color = opencv::core::Scalar::new(0., 255., 0., 0.);
+        let thickness = 2;
+
+        opencv::imgproc::circle(&mut img_out, center, radius, color, thickness, 16, 0)?;
+    }
 
     // cvt_color(
     //     &img2,
@@ -164,8 +264,7 @@ pub fn locate_nozzle(img0: &mut image::ImageBuffer<image::Rgb<u8>, Vec<u8>>) -> 
     // .unwrap();
 
     // copy image back to ImageBuffer
-
-    img0.copy_from_slice(img.data_bytes()?);
+    img0.copy_from_slice(img_out.data_bytes()?);
 
     Ok(())
 }
