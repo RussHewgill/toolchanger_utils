@@ -42,7 +42,7 @@ pub mod circle_aggregator {
     impl Default for CircleAggregator {
         fn default() -> Self {
             Self {
-                window_size: 15,
+                window_size: 30,
                 high_threshold: 0.8,
                 low_threshold: 0.2,
                 buffer: VecDeque::with_capacity(30),
@@ -119,7 +119,7 @@ pub mod circle_aggregator {
             let hits: Vec<&(f64, f64, f64)> =
                 self.buffer.iter().filter_map(|c| c.as_ref()).collect();
 
-            if hits.len() <= 5 {
+            if hits.len() < self.window_size / 2 {
                 return None;
             }
 
@@ -265,7 +265,7 @@ impl Default for WebcamSettings {
             blur_sigma: 6.0,
             adaptive_threshold: false,
             // threshold_block_size: 3,
-            threshold_block_size: 17,
+            threshold_block_size: 35,
             // adaptive_threshold_c: 1,
             threshold_type: 1,
             use_hough: false,

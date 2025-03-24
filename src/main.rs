@@ -14,6 +14,7 @@ pub mod options;
 pub mod ui;
 pub mod vision;
 pub mod webcam;
+pub mod appconfig;
 
 use std::collections::HashMap;
 

@@ -90,20 +90,23 @@ impl KlipperProtocol {
         Ok((x, y, z))
     }
 
-    pub fn move_to_position(&mut self, pos: (f64, f64)) -> Result<()> {
+    pub fn move_to_position(&mut self, pos: (f64, f64), bounce: Option<f64>) -> Result<()> {
         let gcode = "G1 Z30";
         self.run_gcode(&gcode, false)?;
 
         let x = pos.0;
         let y = pos.1;
 
-        let gcode = format!("G1 X{} Y{}", x - 0.5, y - 0.5);
-        debug!("Running gcode 0: {}", gcode);
-        self.run_gcode(&gcode, false)?;
+        if let Some(bounce_amount) = bounce {
+            let gcode = format!("G1 X{} Y{}", x - bounce_amount, y - bounce_amount);
+            debug!("Running gcode 0: {}", gcode);
+            self.run_gcode(&gcode, false)?;
+        }
 
         let gcode = format!("G1 X{} Y{}", x, y);
         debug!("Running gcode 1: {}", gcode);
         self.run_gcode(&gcode, true)?;
+
         Ok(())
     }
 

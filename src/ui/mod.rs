@@ -54,7 +54,7 @@ impl App {
 /// controls
 impl App {
     fn controls(&mut self, ui: &mut egui::Ui) {
-        let Some(klipper) = &mut self.klipper else {
+        if self.klipper.is_none() {
             ui.label("No Klipper connection");
 
             if ui.button("Connect").clicked() || !self.tried_startup_connection {
@@ -87,12 +87,16 @@ impl App {
 
             return;
         };
-        drop(klipper);
 
         /// Auto Offset
         ui.horizontal(|ui| {
             let button = egui::Button::new(RichText::new("Locate Single Nozzle").size(16.));
-            let button = if self.auto_offset.is_some() {
+            let button = if self
+                .auto_offset
+                .as_ref()
+                .map(|a| a.single_tool())
+                .unwrap_or(false)
+            {
                 button.fill(Color32::from_rgb(50, 158, 244))
             } else {
                 button
@@ -109,18 +113,22 @@ impl App {
             }
 
             let button = egui::Button::new(RichText::new("Locate All Nozzles").size(16.));
-            let button = if self.auto_offset.is_some() {
+            let button = if self
+                .auto_offset
+                .as_ref()
+                .map(|a| !a.single_tool())
+                .unwrap_or(false)
+            {
                 button.fill(Color32::from_rgb(50, 158, 244))
             } else {
                 button
             };
             if ui.add(button).clicked() {
                 if self.auto_offset.is_none() {
-                    let pos = klipper
-                        .get_position()
-                        .map(|(x, y, _)| (x, y))
-                        .unwrap_or_default();
-                    self.auto_offset = Some(crate::ui::auto_offset::AutoOffset::new(pos, false));
+                    if let Some((x, y, _)) = self.get_position() {
+                        self.auto_offset =
+                            Some(crate::ui::auto_offset::AutoOffset::new((x, y), false));
+                    }
                 } else {
                     self.auto_offset = None;
                 }
@@ -147,15 +155,11 @@ impl App {
         /// home
         ui.horizontal(|ui| {
             if ui.button(RichText::new("Home All").size(16.)).clicked() {
-                if let Err(e) = klipper.home_all() {
-                    self.errors.push(format!("Failed to home all: {}", e));
-                }
+                self.home_all();
             }
 
             if ui.button(RichText::new("Home XY").size(16.)).clicked() {
-                if let Err(e) = klipper.home_xy() {
-                    self.errors.push(format!("Failed to home XY: {}", e));
-                }
+                self.home_xy();
             }
             //
         });
@@ -164,11 +168,7 @@ impl App {
         /// tools
         ui.horizontal(|ui| {
             if ui.button(RichText::new("Dropoff Tool").size(16.)).clicked() {
-                if let Err(e) = klipper.dropoff_tool() {
-                    self.errors.push(format!("Failed to dropoff tool: {}", e));
-                } else {
-                    self.active_tool = None;
-                }
+                self.dropoff_tool();
             }
 
             for t in 0..4 {
@@ -180,16 +180,9 @@ impl App {
                 };
 
                 if ui.add(but).clicked() {
-                    if let Err(e) = klipper.pick_tool(t) {
-                        self.errors
-                            .push(format!("Failed to pick tool {}: {}", t, e));
-                    } else {
-                        self.active_tool = Some(t);
-                    }
+                    self.pickup_tool(t, true);
                     if let Some(pos) = self.camera_pos {
-                        if let Err(e) = klipper.move_to_position(pos) {
-                            self.errors.push(format!("Failed to move to camera: {}", e));
-                        }
+                        self.move_to_position(pos, true);
                     } else {
                         self.errors.push("No camera position saved".to_string());
                     }
@@ -201,7 +194,7 @@ impl App {
 
         /// Camera Offset
         ui.horizontal(|ui| {
-            if let Some((x, y, z)) = klipper.get_position() {
+            if let Some((x, y, z)) = self.get_position() {
                 if ui
                     .add(
                         egui::Button::new(RichText::new("Save camera Position").size(16.))
@@ -209,8 +202,8 @@ impl App {
                     )
                     .clicked()
                 {
+                    self.fetch_position();
                     self.camera_pos = Some((x, y));
-                    // klipper.set_camera_pos(x, y);
                 }
 
                 if ui
@@ -221,9 +214,7 @@ impl App {
                     .clicked()
                 {
                     if let Some(pos) = self.camera_pos {
-                        if let Err(e) = klipper.move_to_position(pos) {
-                            self.errors.push(format!("Failed to move to camera: {}", e));
-                        }
+                        self.move_to_position(pos, true);
                     } else {
                         self.errors.push("No camera position saved".to_string());
                     }
@@ -274,10 +265,7 @@ impl App {
                     .add(Button::new(RichText::new(format!("Pos {}", i)).size(15.)))
                     .clicked()
                 {
-                    if let Err(e) = klipper.move_to_position(*pos) {
-                        self.errors
-                            .push(format!("Failed to move to test pos {}: {}", i, e));
-                    }
+                    self.move_to_position(*pos, true);
                 }
             }
 
@@ -285,14 +273,15 @@ impl App {
                 .add(Button::new(RichText::new("Test move (0.5, 0.5)").size(15.)))
                 .clicked()
             {
-                self.move_relative((0.5, 0.5), true);
+                let x = 5.0;
+                self.move_relative((x, x), true);
             }
         });
         ui.separator();
 
         let steps = [0.01, 0.1, 0.5, 1., 5.];
 
-        let Some((x, y, z)) = klipper.get_position() else {
+        let Some((x, y, z)) = self.get_position() else {
             ui.label("No position");
             return;
         };
@@ -384,12 +373,8 @@ impl App {
                 if ui.add(button).clicked() {
                     eprintln!("Clicked on X: {}", -step);
 
-                    let klipper = self.klipper.as_mut().unwrap();
-
                     let step = if neg { -step } else { step };
-                    if let Err(e) = klipper.move_axis_relative(axis, step, step.abs() < 1.0) {
-                        self.errors.push(format!("Failed to move X: {}", e));
-                    }
+                    self.move_axis_relative(axis, step, true);
                 }
             });
         }
@@ -397,6 +382,7 @@ impl App {
         strip
     }
 
+    #[cfg(feature = "nope")]
     fn offset_adjust(&mut self, ui: &mut egui::Ui) {
         let Some(tool) = self.active_tool else {
             ui.label("No active tool");
@@ -436,11 +422,6 @@ impl App {
         ui.separator();
 
         ui.horizontal(|ui| {
-            let Some(klipper) = self.klipper.as_mut() else {
-                ui.label("No Klipper connection");
-                return;
-            };
-
             if ui.button("Apply").clicked() {
                 let axis = match self.offset_axis {
                     Axis::X => 0,
@@ -505,11 +486,7 @@ impl App {
                     }
 
                     let cam_pos = self.camera_pos.unwrap();
-                    if let Err(e) = klipper.move_to_position(cam_pos) {
-                        self.errors.push(format!("Failed to move camera: {}", e));
-                    }
-
-                    //
+                    self.move_to_position(cam_pos, true)
                 }
             }
         });
@@ -901,7 +878,7 @@ impl eframe::App for App {
                         if let Some(auto_offset) = self.auto_offset.take() {
                             self.auto_offset = self.auto_offset(ui, auto_offset);
                         } else {
-                            self.offset_adjust(ui);
+                            // self.offset_adjust(ui);
                         }
                     });
 

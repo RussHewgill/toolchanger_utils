@@ -349,6 +349,8 @@ pub fn locate_nozzle(
     if settings.use_hough {
         detectors.keypoints.clear();
 
+        let mut color = opencv::core::Scalar::new(0., 255., 0., 0.);
+
         detectors
             .standard
             .detect(&mat0, &mut detectors.keypoints, &opencv::core::no_array())?;
@@ -367,22 +369,23 @@ pub fn locate_nozzle(
             // debug!("mat1: found {}", detectors.keypoints.len());
         }
 
-        // if detectors.keypoints.len() == 0 {
-        //     detectors
-        //         .relaxed
-        //         .detect(&mat, &mut detectors.keypoints, &opencv::core::no_array())?;
-        //     if detectors.keypoints.len() > 0 {
-        //         // debug!(
-        //         //     "Relaxed detector found {} keypoints",
-        //         //     detectors.keypoints.len()
-        //         // );
-        //     }
-        // } else {
-        //     // debug!(
-        //     //     "Standard detector found {} keypoints",
-        //     //     detectors.keypoints.len()
-        //     // );
-        // }
+        if detectors.keypoints.len() == 0 {
+            detectors
+                .relaxed
+                .detect(&mat1, &mut detectors.keypoints, &opencv::core::no_array())?;
+            if detectors.keypoints.len() > 0 {
+                // debug!(
+                //     "Relaxed detector found {} keypoints",
+                //     detectors.keypoints.len()
+                // );
+                color = opencv::core::Scalar::new(0., 0., 255., 0.);
+            }
+        } else {
+            // debug!(
+            //     "Standard detector found {} keypoints",
+            //     detectors.keypoints.len()
+            // );
+        }
 
         // if detectors.keypoints.len() == 0 {
         //     detectors.super_relaxed.detect(
@@ -431,11 +434,16 @@ pub fn locate_nozzle(
                 }
 
                 let center = opencv::core::Point::new(x as i32, y as i32);
+
                 let radius = radius as i32;
                 // let center = opencv::core::Point::new(322, 241);
-                let color = opencv::core::Scalar::new(0., 255., 0., 0.);
+                // let color = opencv::core::Scalar::new(0., 255., 0., 0.);
                 let thickness = 2;
                 opencv::imgproc::circle(&mut img_color, center, radius, color, thickness, 16, 0)?;
+
+                // let center = opencv::core::Point::new(img_color.cols() / 2, img_color.rows() / 2);
+                // let color = opencv::core::Scalar::new(255., 255., 0., 0.);
+                // opencv::imgproc::circle(&mut img_color, center, radius / 2, color, 1, 16, 0)?;
 
                 img_out = img_color;
             }

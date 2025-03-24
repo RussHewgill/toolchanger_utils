@@ -28,8 +28,8 @@ impl BlobDetectors {
             // min_area: 400.0,
             // max_area: 900.0,
             // max_area: 15000.0,
-            // min_area: std::f32::consts::PI * 40.0f32.powi(2), // ~5000
-            min_area: std::f32::consts::PI * 20.0f32.powi(2), // ~1250
+            min_area: std::f32::consts::PI * 40.0f32.powi(2), // ~5000
+            // min_area: std::f32::consts::PI * 20.0f32.powi(2), // ~1250
             max_area: std::f32::consts::PI * 100.0f32.powi(2), // 30_000
 
             /// Filter by circularity
@@ -43,14 +43,15 @@ impl BlobDetectors {
             filter_by_convexity: true,
             // filter_by_convexity: false,
             min_convexity: 0.3,
+            // min_convexity: 0.5,
             max_convexity: 1.0,
 
             /// Filter by inertia
             filter_by_inertia: true,
             // filter_by_inertia: false,
-            min_inertia_ratio: 0.3, // kTAMV
+            // min_inertia_ratio: 0.3, // kTAMV
             // min_inertia_ratio: 0.8,
-            // min_inertia_ratio: 0.1,
+            min_inertia_ratio: 0.5,
             // max_inertia_ratio: f32::INFINITY,
             max_inertia_ratio: 340282350000000000000000000000000000000.,
 
@@ -80,7 +81,7 @@ impl BlobDetectors {
 
             /// Filter by circularity
             filter_by_circularity: true,
-            min_circularity: 0.6,
+            min_circularity: 0.4,
             max_circularity: 1.0,
 
             /// Filter by convexity

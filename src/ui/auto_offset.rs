@@ -28,12 +28,16 @@ impl AutoOffset {
     pub fn current_tool(&self) -> i32 {
         self.current_tool
     }
+
+    pub fn single_tool(&self) -> bool {
+        self.single_tool
+    }
 }
 
 impl AutoOffset {
-    pub const TARGET_MAX_OFFSET: f64 = 0.05;
+    pub const TARGET_MAX_OFFSET: f64 = 0.01;
     pub const MAX_MARGIN_OF_ERROR: f64 = 0.2;
-    pub const MIN_INTERVAL_BETWEEN_MOVES: f64 = 1.0;
+    pub const MIN_INTERVAL_BETWEEN_MOVES: f64 = 2.0;
 }
 
 impl App {
@@ -59,7 +63,8 @@ impl App {
         if !auto_offset.single_tool && auto_offset.current_tool < 0 {
             /// XXX: dropoff the tool first?
             // self.dropoff_tool();
-            self.pickup_tool(0);
+            self.pickup_tool(0, true);
+            auto_offset.current_tool = 0;
         }
 
         let pos = self.get_position().unwrap();
@@ -103,24 +108,18 @@ impl App {
         if offset_x.abs() > AutoOffset::TARGET_MAX_OFFSET
             || offset_y.abs() > AutoOffset::TARGET_MAX_OFFSET
         {
-            debug!("Moving to center: ({}, {})", offset_x, offset_y);
+            debug!("Moving to center: ({:.4}, {:.4})", offset_x, offset_y);
 
             /// move to center nozzle
-            // if let Err(e) = klipper.move_axis_relative(Axis::X, offset_x, true) {
-            //     error!("Failed to move X axis: {}", e);
-            // }
-            // self.move_axis_relative(Axis::X, offset_x, true);
-
-            // if let Err(e) = klipper.move_axis_relative(Axis::Y, offset_y, true) {
-            //     error!("Failed to move Y axis: {}", e);
-            // }
-            self.move_relative((offset_x, offset_y), true);
+            // self.move_relative((offset_x, offset_y), true);
+            self.move_axis_relative(Axis::X, offset_x, true);
+            self.move_axis_relative(Axis::Y, offset_y, true);
 
             auto_offset.last_move = Instant::now();
         } else {
             if auto_offset.single_tool {
                 // nozzle is centered, halt auto offset
-                self.auto_offset = None;
+                return None;
             } else {
                 // if we are doing all tools:
                 // apply offsets
@@ -140,7 +139,7 @@ impl App {
 
                 if auto_offset.current_tool < self.options.num_tools as i32 {
                     auto_offset.current_tool += 1;
-                    self.pickup_tool(auto_offset.current_tool as usize);
+                    self.pickup_tool(auto_offset.current_tool as usize, true);
                 }
             }
         }
