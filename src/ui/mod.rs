@@ -1,3 +1,5 @@
+pub mod auto_offset;
+pub mod klipper_ui;
 pub mod ui_types;
 
 use ui_types::*;
@@ -5,7 +7,7 @@ use ui_types::*;
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use tracing::{debug, error, info, trace, warn};
 
-use egui::RichText;
+use egui::{Button, Color32, RichText};
 use egui_extras::StripBuilder;
 
 use crate::vision::WebcamSettings;
@@ -85,6 +87,62 @@ impl App {
 
             return;
         };
+        drop(klipper);
+
+        /// Auto Offset
+        ui.horizontal(|ui| {
+            let button = egui::Button::new(RichText::new("Locate Single Nozzle").size(16.));
+            let button = if self.auto_offset.is_some() {
+                button.fill(Color32::from_rgb(50, 158, 244))
+            } else {
+                button
+            };
+            if ui.add(button).clicked() {
+                if self.auto_offset.is_none() {
+                    if let Some((x, y, _)) = self.get_position() {
+                        self.auto_offset =
+                            Some(crate::ui::auto_offset::AutoOffset::new((x, y), true));
+                    }
+                } else {
+                    self.auto_offset = None;
+                }
+            }
+
+            let button = egui::Button::new(RichText::new("Locate All Nozzles").size(16.));
+            let button = if self.auto_offset.is_some() {
+                button.fill(Color32::from_rgb(50, 158, 244))
+            } else {
+                button
+            };
+            if ui.add(button).clicked() {
+                if self.auto_offset.is_none() {
+                    let pos = klipper
+                        .get_position()
+                        .map(|(x, y, _)| (x, y))
+                        .unwrap_or_default();
+                    self.auto_offset = Some(crate::ui::auto_offset::AutoOffset::new(pos, false));
+                } else {
+                    self.auto_offset = None;
+                }
+            }
+        });
+        ui.separator();
+
+        /// screenshot
+        ui.horizontal(|ui| {
+            if ui
+                .button(RichText::new("Save Screenshot").size(16.))
+                .clicked()
+            {
+                // self.save_screenshot();
+                let _ = self
+                    .channel_to_vision
+                    .as_mut()
+                    .unwrap()
+                    .try_send(crate::vision::WebcamCommand::SaveScreenshot);
+            }
+        });
+        ui.separator();
 
         /// home
         ui.horizontal(|ui| {
@@ -101,7 +159,6 @@ impl App {
             }
             //
         });
-
         ui.separator();
 
         /// tools
@@ -130,7 +187,7 @@ impl App {
                         self.active_tool = Some(t);
                     }
                     if let Some(pos) = self.camera_pos {
-                        if let Err(e) = klipper.move_camera(pos) {
+                        if let Err(e) = klipper.move_to_position(pos) {
                             self.errors.push(format!("Failed to move to camera: {}", e));
                         }
                     } else {
@@ -140,7 +197,6 @@ impl App {
             }
             //
         });
-
         ui.separator();
 
         /// Camera Offset
@@ -165,7 +221,7 @@ impl App {
                     .clicked()
                 {
                     if let Some(pos) = self.camera_pos {
-                        if let Err(e) = klipper.move_camera(pos) {
+                        if let Err(e) = klipper.move_to_position(pos) {
                             self.errors.push(format!("Failed to move to camera: {}", e));
                         }
                     } else {
@@ -201,7 +257,37 @@ impl App {
                 }
             };
         });
+        ui.separator();
 
+        /// Test positions
+        ui.horizontal(|ui| {
+            let test_positions = [
+                (283.54, 25.13),
+                (284.16, 25.02),
+                (283.86, 23.52),
+                (284.36, 23.52),
+                //
+            ];
+
+            for (i, pos) in test_positions.iter().enumerate() {
+                if ui
+                    .add(Button::new(RichText::new(format!("Pos {}", i)).size(15.)))
+                    .clicked()
+                {
+                    if let Err(e) = klipper.move_to_position(*pos) {
+                        self.errors
+                            .push(format!("Failed to move to test pos {}: {}", i, e));
+                    }
+                }
+            }
+
+            if ui
+                .add(Button::new(RichText::new("Test move (0.5, 0.5)").size(15.)))
+                .clicked()
+            {
+                self.move_relative((0.5, 0.5), true);
+            }
+        });
         ui.separator();
 
         let steps = [0.01, 0.1, 0.5, 1., 5.];
@@ -225,13 +311,13 @@ impl App {
                         // .sizes(egui_extras::Size::relative(0.1), steps.len())
                         .cell_layout(egui::Layout::default().with_cross_align(egui::Align::Center))
                         .horizontal(|mut strip| {
-                            let mut strip = self.button_range(strip, 0, &steps, true);
+                            let mut strip = self.button_range(strip, Axis::X, &steps, true);
 
                             strip.cell(|ui| {
                                 ui.label(RichText::new(format!("X: {:.2}", x)).size(20.));
                             });
 
-                            let mut strip = self.button_range(strip, 0, &steps, false);
+                            let mut strip = self.button_range(strip, Axis::X, &steps, false);
                         });
                 });
 
@@ -244,13 +330,13 @@ impl App {
                         .sizes(egui_extras::Size::exact(button_width), steps.len())
                         .cell_layout(egui::Layout::default().with_cross_align(egui::Align::Center))
                         .horizontal(|mut strip| {
-                            let mut strip = self.button_range(strip, 1, &steps, true);
+                            let mut strip = self.button_range(strip, Axis::Y, &steps, true);
 
                             strip.cell(|ui| {
                                 ui.label(RichText::new(format!("Y: {:.2}", y)).size(20.));
                             });
 
-                            let mut strip = self.button_range(strip, 1, &steps, false);
+                            let mut strip = self.button_range(strip, Axis::Y, &steps, false);
                         });
                 });
             });
@@ -271,7 +357,7 @@ impl App {
     fn button_range<'a, 'b>(
         &mut self,
         mut strip: egui_extras::Strip<'a, 'b>,
-        axis: usize,
+        axis: Axis,
         steps: &[f64],
         neg: bool,
     ) -> egui_extras::Strip<'a, 'b> {
@@ -301,7 +387,7 @@ impl App {
                     let klipper = self.klipper.as_mut().unwrap();
 
                     let step = if neg { -step } else { step };
-                    if let Err(e) = klipper.move_axis(axis, step, step.abs() < 1.0) {
+                    if let Err(e) = klipper.move_axis_relative(axis, step, step.abs() < 1.0) {
                         self.errors.push(format!("Failed to move X: {}", e));
                     }
                 }
@@ -419,7 +505,7 @@ impl App {
                     }
 
                     let cam_pos = self.camera_pos.unwrap();
-                    if let Err(e) = klipper.move_camera(cam_pos) {
+                    if let Err(e) = klipper.move_to_position(cam_pos) {
                         self.errors.push(format!("Failed to move camera: {}", e));
                     }
 
@@ -439,14 +525,20 @@ impl App {
                     }
                     ui.end_row();
 
-                    let (confidence, result) = self.running_average.get_result();
-                    // let confidence = self.running_average.calculate_confidence();
-                    ui.label(format!("Confidence: {:.3}", confidence));
-                    ui.end_row();
-                    if let Some(result) = result {
-                        ui.label(format!("Result: ({:.3}, {:.3})", result.0, result.1));
+                    // let (confidence, result) = self.running_average.get_result();
+                    // // let confidence = self.running_average.calculate_confidence();
+                    // ui.label(format!("Confidence: {:.3}", confidence));
+                    // ui.end_row();
+                    // if let Some(result) = result {
+                    //     ui.label(format!("Result: ({:.3}, {:.3})", result.0, result.1));
+                    // } else {
+                    //     ui.label("Result: None");
+                    // }
+
+                    if let Some((_, moe)) = self.running_average.calculate_margin_of_error() {
+                        ui.label(format!("Margin of Error: ({:.3}, {:.3})", moe.0, moe.1));
                     } else {
-                        ui.label("Result: None");
+                        ui.label("Margin of Error: None");
                     }
 
                     ui.end_row();
@@ -476,15 +568,18 @@ impl App {
                     //     self.crosshair_circle_size.clone(),
                     // );
 
-                    let (tx, rx) = crossbeam_channel::unbounded();
+                    let (tx_to_ui, rx_to_ui) = crossbeam_channel::unbounded();
+                    self.channel_to_ui = Some(rx_to_ui);
 
-                    self.channel_to_ui = Some(rx);
+                    let (tx_to_vision, rx_to_vision) = crossbeam_channel::bounded(1);
+                    self.channel_to_vision = Some(tx_to_vision);
 
                     crate::vision::spawn_locator_thread(
                         ui.ctx().clone(),
                         texture.clone(),
                         0,
-                        tx,
+                        rx_to_vision,
+                        tx_to_ui,
                         self.webcam_settings_mutex.clone(),
                     );
 
@@ -498,7 +593,8 @@ impl App {
                 // 640., 480.,
             );
             // let size = size / 1.;
-            let size = size / 2.;
+            // let size = size / 2.;
+            let size = size / 1.5;
 
             let img = egui::Image::from_texture((texture.id(), size))
                 .fit_to_exact_size(size)
@@ -531,7 +627,6 @@ impl App {
             )
             .integer(),
         );
-
         if resp.hovered() {
             let delta = ui.input(|i| {
                 i.events.iter().find_map(|e| match e {
@@ -546,29 +641,47 @@ impl App {
             if let Some(delta) = delta {
                 if delta.y > 0. {
                     self.webcam_settings.filter_step += 1;
-                } else if delta.y < 0. {
+                } else if delta.y < 0. && self.webcam_settings.filter_step > 0 {
                     self.webcam_settings.filter_step -= 1;
                 }
             }
         }
         ui.end_row();
 
-        // ui.label("Threshold");
-        // ui.add(egui::Slider::new(
-        //     &mut self.webcam_settings.threshold,
-        //     0..=100,
-        // ));
-        // ui.end_row();
-
-        ui.label("Use Adaptive Threshold");
-        ui.checkbox(&mut self.webcam_settings.adaptive_threshold, "");
+        ui.label("Pipeline");
+        let resp = ui
+            .add(egui::Slider::new(&mut self.webcam_settings.preprocess_pipeline, 0..=3).integer());
+        if resp.hovered() {
+            let delta = ui.input(|i| {
+                i.events.iter().find_map(|e| match e {
+                    egui::Event::MouseWheel {
+                        unit: _,
+                        delta,
+                        modifiers,
+                    } => Some(*delta),
+                    _ => None,
+                })
+            });
+            if let Some(delta) = delta {
+                if delta.y > 0. {
+                    self.webcam_settings.preprocess_pipeline += 1;
+                } else if delta.y < 0. && self.webcam_settings.preprocess_pipeline > 0 {
+                    self.webcam_settings.preprocess_pipeline -= 1;
+                }
+            }
+        }
         ui.end_row();
 
-        ui.label("Adaptive Threshold Block Size");
+        // ui.label("Use Adaptive Threshold");
+        // ui.checkbox(&mut self.webcam_settings.adaptive_threshold, "");
+        // ui.end_row();
+
+        ui.label("Threshold Block Size");
         let resp = ui.add(
-            egui::DragValue::new(&mut self.webcam_settings.adaptive_threshold_block_size)
+            egui::DragValue::new(&mut self.webcam_settings.threshold_block_size)
                 .speed(1.0)
-                .fixed_decimals(0),
+                .fixed_decimals(0)
+                .range(0..=255),
             // egui::Slider::new(
             //     &mut self.webcam_settings.adaptive_threshold_block_size,
             //     1..=100,
@@ -589,47 +702,115 @@ impl App {
             });
             if let Some(delta) = delta {
                 if delta.y > 0. {
-                    self.webcam_settings.adaptive_threshold_block_size += 2;
+                    self.webcam_settings.threshold_block_size += 2;
                 } else if delta.y < 0. {
-                    self.webcam_settings.adaptive_threshold_block_size -= 2;
+                    self.webcam_settings.threshold_block_size -= 2;
                 }
             }
         }
         ui.end_row();
 
-        ui.label("Adaptive Threshold C");
-        ui.add(
-            egui::DragValue::new(&mut self.webcam_settings.adaptive_threshold_c)
-                .speed(0.1)
-                .fixed_decimals(1),
-        );
+        // ui.label("Adaptive Threshold C");
+        // ui.add(
+        //     egui::DragValue::new(&mut self.webcam_settings.adaptive_threshold_c)
+        //         .speed(0.1)
+        //         .fixed_decimals(1),
+        // );
+        // ui.end_row();
+
+        ui.label("Threshold Type");
+        let resp =
+            ui.add(egui::Slider::new(&mut self.webcam_settings.threshold_type, 0..=2).integer());
+
+        if resp.hovered() {
+            let delta = ui.input(|i| {
+                i.events.iter().find_map(|e| match e {
+                    egui::Event::MouseWheel {
+                        unit: _,
+                        delta,
+                        modifiers,
+                    } => Some(*delta),
+                    _ => None,
+                })
+            });
+            if let Some(delta) = delta {
+                if delta.y > 0. {
+                    self.webcam_settings.threshold_type += 1;
+                } else if delta.y < 0. && self.webcam_settings.threshold_type > 0 {
+                    self.webcam_settings.threshold_type -= 1;
+                }
+            }
+        }
         ui.end_row();
 
         ui.label("Blur Kernel Size");
-        ui.add(
+        let resp = ui.add(
             egui::DragValue::new(&mut self.webcam_settings.blur_kernel_size)
                 .speed(1.0)
                 .fixed_decimals(0),
         );
+        if resp.hovered() {
+            let delta = ui.input(|i| {
+                i.events.iter().find_map(|e| match e {
+                    egui::Event::MouseWheel {
+                        unit: _,
+                        delta,
+                        modifiers,
+                    } => Some(*delta),
+                    _ => None,
+                })
+            });
+            if let Some(delta) = delta {
+                if delta.y > 0. {
+                    self.webcam_settings.blur_kernel_size += 2;
+                } else if delta.y < 0. {
+                    self.webcam_settings.blur_kernel_size -= 2;
+                }
+            }
+        }
         ui.end_row();
 
         ui.label("Blur Sigma");
-        ui.add(
+        let resp = ui.add(
             egui::DragValue::new(&mut self.webcam_settings.blur_sigma)
                 .speed(0.1)
                 .fixed_decimals(1),
         );
-
+        if resp.hovered() {
+            let delta = ui.input(|i| {
+                i.events.iter().find_map(|e| match e {
+                    egui::Event::MouseWheel {
+                        unit: _,
+                        delta,
+                        modifiers,
+                    } => Some(*delta),
+                    _ => None,
+                })
+            });
+            if let Some(delta) = delta {
+                if delta.y > 0. {
+                    self.webcam_settings.blur_sigma += 0.25;
+                } else if delta.y < 0. {
+                    self.webcam_settings.blur_sigma -= 0.25;
+                }
+            }
+        }
         ui.end_row();
 
         ui.label("Draw Circle");
         ui.checkbox(&mut self.webcam_settings.draw_circle, "");
-
         ui.end_row();
 
         ui.label("Use Hough");
         ui.checkbox(&mut self.webcam_settings.use_hough, "");
+        ui.end_row();
 
+        ui.label("Pixels to mm");
+        ui.add(
+            egui::DragValue::new(&mut self.webcam_settings.pixels_per_mm)
+                .speed(0.1)
+                .fixed_decimals(2),
+        );
         ui.end_row();
 
         if self.webcam_settings != self.webcam_settings_prev {
@@ -717,7 +898,11 @@ impl eframe::App for App {
                     .resizable(false)
                     .default_height(200.)
                     .show(ctx, |ui| {
-                        self.offset_adjust(ui);
+                        if let Some(auto_offset) = self.auto_offset.take() {
+                            self.auto_offset = self.auto_offset(ui, auto_offset);
+                        } else {
+                            self.offset_adjust(ui);
+                        }
                     });
 
                 egui::CentralPanel::default().show(ctx, |ui| {

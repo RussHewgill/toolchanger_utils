@@ -37,52 +37,102 @@ fn main() -> opencv::Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "nope")]
-fn main() {
+#[cfg(feature = "tests")]
+fn main() -> Result<()> {
     logging::init_logs();
 
-    let poss = [
-        (629.5, 404.5, 37.20000076293945),
-        (734.5, 117.5, 33.79999923706055),
-        (642.5, 403.5, 49.400001525878906),
-        (640.5, 400.5, 48.29999923706055),
-        (879.5, 655.5, 43.79999923706055),
-        (634.5, 404.5, 41.599998474121094),
-        (630.5, 412.5, 42.70000076293945),
-        (834.5, 49.5, 36.099998474121094),
-        (639.5, 411.5, 49.400001525878906),
-        (631.5, 412.5, 42.70000076293945),
-        (642.5, 403.5, 49.400001525878906),
-        (637.5, 407.5, 45.0),
-        (630.5, 412.5, 42.70000076293945),
-        (637.5, 407.5, 45.0),
-        (738.5, 116.5, 33.79999923706055),
-        (626.5, 404.5, 33.79999923706055),
-        (813.5, 184.5, 32.70000076293945),
-        (988.5, 94.5, 49.400001525878906),
-        (635.5, 405.5, 42.70000076293945),
-        (640.5, 400.5, 48.29999923706055),
-        (635.5, 405.5, 42.70000076293945),
+    /// get all files in test_images/
+    let mut paths = std::fs::read_dir("test_images").unwrap().enumerate();
+
+    // 10 images per center
+    let centers = [
+        (944., 450.), // 0-9
+        (947., 545.), // 10-19
+        (370., 181.), // 20-29
+        (635., 400.), // 30-39
     ];
 
-    let mut agg = vision::vision_types::CircleAggregator::new(30, 50., 10.);
+    let mut detectors = vision::blob_detection::BlobDetectors::new().unwrap();
 
-    for pos in poss.iter() {
-        agg.add_frame(Some(*pos));
+    let settings = {
+        let mut settings = vision::WebcamSettings::default();
+
+        settings.adaptive_threshold = false;
+        settings.threshold_block_size = 3;
+
+        settings.blur_kernel_size = 7;
+        settings.blur_sigma = 6.0;
+
+        settings
+    };
+
+    let mut errors: Vec<Vec<(f64, f64)>> = vec![];
+
+    for n in 0..centers.len() {
+        let mut errors_i = vec![];
+
+        for i in 0..10 {
+            let path = paths.next().unwrap().1.unwrap().path();
+            let mut img = image::ImageReader::open(path)?
+                .decode()?
+                .as_rgb8()
+                .unwrap()
+                .clone();
+
+            let (_, pos) =
+                vision::locate_nozzle::locate_nozzle(&mut img, &settings, &mut detectors)?;
+
+            if let Some(pos) = pos {
+                let error_x = (centers[n].0 - pos.0).abs();
+                let error_y = (centers[n].1 - pos.1).abs();
+
+                // debug!("Path {}: ({:.1}, {:.1})", i, pos.0, pos.1);
+                // debug!("Error: ({:.1}, {:.1})", error_x, error_y);
+
+                errors_i.push((error_x, error_y));
+            } else {
+                // debug!("No position found");
+            }
+        }
+
+        errors.push(errors_i);
     }
 
-    // let median = agg.calculate_median();
+    for (i, c) in centers.iter().enumerate() {
+        eprintln!("Center: ({:.1}, {:.1})", c.0, c.1);
 
-    let (confidence, result) = agg.get_result();
+        let mut error_x = 0.;
+        let mut error_y = 0.;
 
-    debug!("Confidence: {}", confidence);
-    debug!("Result: {:?}", result);
+        let errors = &errors[i];
 
-    //
+        if errors.len() == 0 {
+            eprintln!("    No positions found");
+            continue;
+        }
+
+        for e in errors {
+            error_x += e.0;
+            error_y += e.1;
+        }
+
+        error_x /= errors.len() as f64;
+        error_y /= errors.len() as f64;
+
+        eprintln!("    Average error: ({:.1}, {:.1})", error_x, error_y);
+    }
+
+    #[cfg(feature = "nope")]
+    for (i, path) in paths.enumerate() {
+        // read to ImageBuffer
+    }
+
+    Ok(())
 }
 
 /// Main App
 // #[cfg(feature = "nope")]
+#[cfg(not(feature = "tests"))]
 fn main() -> eframe::Result<()> {
     use ui::ui_types::App;
 

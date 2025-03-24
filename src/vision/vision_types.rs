@@ -16,6 +16,11 @@ pub enum NozzlePosition {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum WebcamCommand {
+    SaveScreenshot,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WebcamMessage {
     /// X, Y, radius
     FoundNozzle((f64, f64, f64)),
@@ -37,8 +42,7 @@ pub mod circle_aggregator {
     impl Default for CircleAggregator {
         fn default() -> Self {
             Self {
-                window_size: 30,
-                /// 1 second
+                window_size: 15,
                 high_threshold: 0.8,
                 low_threshold: 0.2,
                 buffer: VecDeque::with_capacity(30),
@@ -67,7 +71,6 @@ pub mod circle_aggregator {
             self.buffer.push_back(circle);
         }
 
-        // #[cfg(feature = "nope")]
         pub fn calculate_median(hits: &[&(f64, f64, f64)]) -> Option<(f64, f64, f64)> {
             if hits.is_empty() {
                 return None;
@@ -85,7 +88,6 @@ pub mod circle_aggregator {
             Some((xs[mid], ys[mid], radii[mid]))
         }
 
-        // #[cfg(feature = "nope")]
         pub fn get_result(&self) -> (f64, Option<(f64, f64, f64)>) {
             let total = self.buffer.len();
             if total == 0 {
@@ -109,10 +111,43 @@ pub mod circle_aggregator {
                 (confidence, None)
             }
         }
+
+        /// Calculates the margin of error for the current circle detections.
+        /// Returns (x_error, y_error, radius_error) as standard deviations.
+        /// Returns None if there are no hits or only one hit (can't calculate deviation).
+        pub fn calculate_margin_of_error(&self) -> Option<((f64, f64, f64), (f64, f64, f64))> {
+            let hits: Vec<&(f64, f64, f64)> =
+                self.buffer.iter().filter_map(|c| c.as_ref()).collect();
+
+            if hits.len() <= 5 {
+                return None;
+            }
+
+            // Get median values
+            let median = Self::calculate_median(&hits)?;
+
+            // Calculate sum of squared differences from median
+            let (sum_sq_x, sum_sq_y, sum_sq_r) =
+                hits.iter().fold((0.0, 0.0, 0.0), |acc, &&(x, y, r)| {
+                    let dx = x - median.0;
+                    let dy = y - median.1;
+                    let dr = r - median.2;
+
+                    (acc.0 + dx * dx, acc.1 + dy * dy, acc.2 + dr * dr)
+                });
+
+            // Calculate standard deviation
+            let n = hits.len() as f64;
+            let std_dev_x = (sum_sq_x / n).sqrt();
+            let std_dev_y = (sum_sq_y / n).sqrt();
+            let std_dev_r = (sum_sq_r / n).sqrt();
+
+            Some((median, (std_dev_x, std_dev_y, std_dev_r)))
+        }
     }
 }
 
-// #[cfg(feature = "nope")]
+#[cfg(feature = "nope")]
 pub mod running_average {
     use std::collections::VecDeque;
 
@@ -196,17 +231,23 @@ pub mod running_average {
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct WebcamSettings {
-    // pub crosshair_size: f32,
     // pub camera_index: usize,
     pub filter_step: usize,
     // pub threshold: i32,
-    pub adaptive_threshold: bool,
-    pub adaptive_threshold_block_size: i32,
-    pub adaptive_threshold_c: i32,
     pub blur_kernel_size: i32,
     pub blur_sigma: f64,
-    pub draw_circle: bool,
+    pub adaptive_threshold: bool,
+    pub threshold_block_size: i32,
+    // pub adaptive_threshold_c: i32,
+    /// 0: Binary Inv, 1: Binary Inv + Triangle, 2: Binary Inv + Otsu
+    pub threshold_type: usize,
     pub use_hough: bool,
+    pub draw_circle: bool,
+    pub crosshair_size: f32,
+    pub pixels_per_mm: f64,
+    // pub mirror: (bool, bool),
+    // pub rotate: usize,
+    pub preprocess_pipeline: usize,
 }
 
 impl WebcamSettings {
@@ -220,13 +261,20 @@ impl Default for WebcamSettings {
             // camera_index: 0,
             filter_step: 0,
             // threshold: 35,
-            adaptive_threshold: true,
-            adaptive_threshold_block_size: 17,
-            adaptive_threshold_c: 1,
             blur_kernel_size: 7,
             blur_sigma: 6.0,
+            adaptive_threshold: false,
+            // threshold_block_size: 3,
+            threshold_block_size: 17,
+            // adaptive_threshold_c: 1,
+            threshold_type: 1,
+            use_hough: false,
             draw_circle: true,
-            use_hough: true,
+            crosshair_size: 60.,
+            pixels_per_mm: 200.,
+            // mirror: (false, false),
+            // rotate: 3,
+            preprocess_pipeline: 0,
         }
     }
 }

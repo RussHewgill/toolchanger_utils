@@ -3,9 +3,23 @@ use tracing::{debug, error, info, trace, warn};
 
 use crate::ui::ui_types::App;
 
-#[derive(serde::Serialize, serde::Deserialize, Default)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Options {
     pub camera_index: String,
+    pub printer_url: String,
+    pub num_tools: usize,
+    pub bounce_amount: f64,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Options {
+            camera_index: "0".to_string(),
+            printer_url: "".to_string(),
+            num_tools: 4,
+            bounce_amount: 0.5,
+        }
+    }
 }
 
 impl App {

@@ -120,7 +120,7 @@ impl Webcam {
     }
 }
 
-fn draw_crosshair(radius: f32, img: &mut egui::ColorImage) {
+pub fn draw_crosshair(radius: f32, img: &mut egui::ColorImage) {
     let width = img.width();
     let height = img.height();
 

@@ -3,6 +3,10 @@ name = "toolchanger_utils"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+tests = []
+
 [dependencies]
 serde_json = "1.0.117"
 serde = { version = "1.0.201", features = ["derive"] }
@@ -34,7 +38,7 @@ bytemuck_derive = ">=1.8.1, <1.9.0"
 nokhwa = { version = "0.10.7", features = ["input-native"] }
 # egui-wgpu = "0.31.1"
 
-image = { version = "0.25", default-features = false }
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
 opencv = "0.94.3"
 crossbeam-channel = "0.5.14"
 

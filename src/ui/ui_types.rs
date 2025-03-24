@@ -49,6 +49,12 @@ pub struct App {
 
     #[serde(skip)]
     pub channel_to_ui: Option<crossbeam_channel::Receiver<crate::vision::WebcamMessage>>,
+
+    #[serde(skip)]
+    pub channel_to_vision: Option<crossbeam_channel::Sender<crate::vision::WebcamCommand>>,
+
+    #[serde(skip)]
+    pub auto_offset: Option<crate::ui::auto_offset::AutoOffset>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, PartialOrd)]

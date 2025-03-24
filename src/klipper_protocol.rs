@@ -5,10 +5,13 @@ use tracing::{debug, error, info, trace, warn};
 
 use serde_json::Value;
 
+use crate::ui::ui_types::Axis;
+
+#[derive(Clone)]
 pub struct KlipperProtocol {
     pub url: String,
     client: reqwest::blocking::Client,
-    id: AtomicU32,
+    id: std::sync::Arc<AtomicU32>,
 
     position: Option<(f64, f64, f64)>,
     // camera_pos: Option<(f64, f64)>,
@@ -25,7 +28,7 @@ impl KlipperProtocol {
         Ok(KlipperProtocol {
             url: url.to_string(),
             client,
-            id: AtomicU32::new(1),
+            id: std::sync::Arc::new(AtomicU32::new(1)),
 
             position: None,
             // camera_pos: None,
@@ -87,7 +90,7 @@ impl KlipperProtocol {
         Ok((x, y, z))
     }
 
-    pub fn move_camera(&mut self, pos: (f64, f64)) -> Result<()> {
+    pub fn move_to_position(&mut self, pos: (f64, f64)) -> Result<()> {
         let gcode = "G1 Z30";
         self.run_gcode(&gcode, false)?;
 
@@ -95,18 +98,20 @@ impl KlipperProtocol {
         let y = pos.1;
 
         let gcode = format!("G1 X{} Y{}", x - 0.5, y - 0.5);
+        debug!("Running gcode 0: {}", gcode);
         self.run_gcode(&gcode, false)?;
 
         let gcode = format!("G1 X{} Y{}", x, y);
+        debug!("Running gcode 1: {}", gcode);
         self.run_gcode(&gcode, true)?;
         Ok(())
     }
 
-    pub fn move_axis(&mut self, axis: usize, amount: f64, bounce: bool) -> Result<()> {
+    pub fn move_axis_relative(&mut self, axis: Axis, amount: f64, bounce: bool) -> Result<()> {
         let axis = match axis {
-            0 => "X",
-            1 => "Y",
-            2 => "Z",
+            Axis::X => "X",
+            Axis::Y => "Y",
+            // Axis::Z => "Z",
             _ => bail!("Invalid axis"),
         };
 
