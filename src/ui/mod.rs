@@ -12,7 +12,7 @@ use tracing::{debug, error, info, trace, warn};
 use egui::{Button, Color32, RichText, Vec2};
 use egui_extras::StripBuilder;
 
-use crate::vision::WebcamSettings;
+use crate::vision::VisionSettings;
 
 /// New
 impl App {
@@ -651,7 +651,7 @@ impl App {
         // let size = size / 1.5;
         let size = size * self.options.camera_scale as f32;
 
-        let c = ui.cursor();
+        // let c = ui.cursor();
         let img = egui::Image::from_texture((texture.id(), size))
             .fit_to_exact_size(size)
             .max_size(size)
@@ -660,13 +660,18 @@ impl App {
 
         let resp = ui.add(img);
 
+        let rect = resp.rect;
+
+        // debug!("rect.min = ({:.1}, {:.1})", rect.min.x, rect.min.y);
+
         if resp.clicked() {
             if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
                 if let Some(tool) = self.active_tool {
                     // offset pos by cursor
 
                     // debug!("c = {:?}", c.min);
-                    let pos = egui::Pos2::new(pos.x - c.min.x, pos.y - c.min.y);
+                    // let pos = egui::Pos2::new(pos.x - c.min.x, pos.y - c.min.y);
+                    let pos = egui::Pos2::new(pos.x - rect.min.x, pos.y - rect.min.y);
 
                     self.data_labeling.target = Some((tool, pos));
                 }
@@ -698,7 +703,8 @@ impl App {
         if let Some((_, pos)) = self.data_labeling.target {
             let painter = ui.painter_at(resp.rect);
 
-            let pos = pos + egui::Vec2::from([c.min.x, c.min.y]);
+            // let pos = pos + egui::Vec2::from([c.min.x, c.min.y]);
+            let pos = pos + egui::Vec2::from([rect.min.x, rect.min.y]);
 
             let radius = self.webcam_settings.target_radius as f32;
 
@@ -722,10 +728,10 @@ impl App {
                 self.data_labeling.num_screens -= 1;
 
                 debug!("pos = ({:.1}, {:.1})", pos.x, pos.y);
-                debug!("c.min = ({:.1}, {:.1})", c.min.x, c.min.y);
+                debug!("c.min = ({:.1}, {:.1})", rect.min.x, rect.min.y);
 
-                let x = pos.x as f64 - c.min.x as f64;
-                let y = pos.y as f64 - c.min.y as f64;
+                let x = pos.x as f64 - rect.min.x as f64;
+                let y = pos.y as f64 - rect.min.y as f64;
 
                 let x = x / self.options.camera_scale;
                 let y = y / self.options.camera_scale;

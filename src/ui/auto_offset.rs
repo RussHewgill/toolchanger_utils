@@ -3,7 +3,7 @@ use tracing::{debug, error, info, trace, warn};
 
 use std::time::Instant;
 
-use crate::{klipper_protocol::KlipperProtocol, vision::WebcamSettings};
+use crate::{klipper_protocol::KlipperProtocol, vision::VisionSettings};
 
 use super::ui_types::{App, Axis};
 

@@ -44,6 +44,13 @@ nokhwa = { version = "0.10.7", features = ["input-native"] }
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 opencv = "0.94.3"
 crossbeam-channel = "0.5.14"
+rayon = "1.10.0"
+
+argmin = { version = "0.10.0", features = ["rayon"] }
+argmin-math = { version = "0.4", features = ["ndarray_latest"] }
+rand_xoshiro = "0.7.0"
+rand = "0.9.0"
+argmin-observer-slog = "0.1.0"
 
 # egui_struct = "0.4.2"
 # rust-i18n = "3.1.3"

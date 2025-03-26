@@ -8,6 +8,10 @@ use opencv::{
 
 #[derive(Debug)]
 pub struct BlobDetectors {
+    pub params_standard: SimpleBlobDetector_Params,
+    pub params_relaxed: SimpleBlobDetector_Params,
+    pub params_super_relaxed: SimpleBlobDetector_Params,
+
     pub standard: Ptr<SimpleBlobDetector>,
     pub relaxed: Ptr<SimpleBlobDetector>,
     pub super_relaxed: Ptr<SimpleBlobDetector>,
@@ -145,14 +149,41 @@ impl BlobDetectors {
     }
 
     pub fn new() -> Result<Self> {
-        let standard = SimpleBlobDetector::create(Self::blob_params_standard())?;
-        let relaxed = SimpleBlobDetector::create(Self::blob_params_relaxed())?;
-        let super_relaxed = SimpleBlobDetector::create(Self::blob_params_super_relaxed())?;
+        let params_standard = Self::blob_params_standard();
+        let params_relaxed = Self::blob_params_relaxed();
+        let params_super_relaxed = Self::blob_params_super_relaxed();
+
+        let standard = SimpleBlobDetector::create(params_standard.clone())?;
+        let relaxed = SimpleBlobDetector::create(params_relaxed.clone())?;
+        let super_relaxed = SimpleBlobDetector::create(params_super_relaxed.clone())?;
+
+        // let standard = SimpleBlobDetector::create(Self::blob_params_standard())?;
 
         // let p2 = SimpleBlobDetector_Params::default().unwrap();
         // debug!("max_inertia_ratio: {}", p2.max_inertia_ratio);
 
         Ok(Self {
+            params_standard,
+            params_relaxed,
+            params_super_relaxed,
+
+            standard,
+            relaxed,
+            super_relaxed,
+            keypoints: Vector::<opencv::core::KeyPoint>::new(),
+        })
+    }
+
+    pub fn make_clone(&self) -> Result<Self> {
+        let standard = SimpleBlobDetector::create(self.params_standard.clone())?;
+        let relaxed = SimpleBlobDetector::create(self.params_relaxed.clone())?;
+        let super_relaxed = SimpleBlobDetector::create(self.params_super_relaxed.clone())?;
+
+        Ok(Self {
+            params_standard: self.params_standard.clone(),
+            params_relaxed: self.params_relaxed.clone(),
+            params_super_relaxed: self.params_super_relaxed.clone(),
+
             standard,
             relaxed,
             super_relaxed,

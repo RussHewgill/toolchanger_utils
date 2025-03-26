@@ -1,11 +1,16 @@
 use anyhow::{anyhow, bail, ensure, Context, Result};
-use opencv::{highgui, imgproc};
 use tracing::{debug, error, info, trace, warn};
 
-use std::collections::HashMap;
+use opencv::{highgui, imgproc};
 
-use crate::{ui::data_labeling::SavedTargets, vision::WebcamSettings};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
+use crate::{ui::data_labeling::SavedTargets, vision::VisionSettings};
+
+#[cfg(feature = "nope")]
 pub fn main_tests() -> Result<()> {
     let results = [
         (284.028, 28.032),
@@ -43,8 +48,13 @@ pub fn main_tests() -> Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "nope")]
 pub fn main_tests() -> Result<()> {
+    crate::tuning::OptimizeData::optimize()?;
+    Ok(())
+}
+
+// #[cfg(feature = "nope")]
+pub fn _main_tests() -> Result<()> {
     let mut saved_targets = {
         let path = "test_images/saved_targets.toml";
         if let Ok(s) = std::fs::read_to_string(&path) {
@@ -58,31 +68,57 @@ pub fn main_tests() -> Result<()> {
     let mut errors: HashMap<String, (f64, f64)> = HashMap::new();
     let mut misses: Vec<String> = vec![];
 
-    let settings = WebcamSettings::default();
+    let settings = VisionSettings::default();
 
     let mut detectors = crate::vision::blob_detection::BlobDetectors::new()?;
 
     let prev_misses = {
-        let mut prev_misses = std::collections::HashSet::new();
-        prev_misses.insert("test_images/frame_0046.jpg".to_string());
-        prev_misses.insert("test_images/frame_0045.jpg".to_string());
-        prev_misses.insert("test_images/frame_0047.jpg".to_string());
-        prev_misses.insert("test_images/frame_0051.jpg".to_string());
-        prev_misses.insert("test_images/frame_0050.jpg".to_string());
-        prev_misses.insert("test_images/frame_0052.jpg".to_string());
-        prev_misses.insert("test_images/frame_0054.jpg".to_string());
-        prev_misses.insert("test_images/frame_0053.jpg".to_string());
+        let mut prev_misses: HashSet<String> = HashSet::new();
+        // prev_misses.insert("test_images/frame_0046.jpg".to_string());
         prev_misses
     };
+
+    /// create output dir
+    let output_dir = "test_images/output";
+    if !std::path::Path::new(output_dir).exists() {
+        std::fs::create_dir(output_dir)?;
+    }
+
+    #[cfg(feature = "nope")]
+    for (path, target) in saved_targets.targets.iter() {
+        debug!("Path: {:?}", path);
+
+        let base = path.parent().unwrap();
+        let output_path = path.file_stem().unwrap();
+        let output_path = base.join(Path::new(&format!(
+            "{}_output.jpg",
+            output_path.to_string_lossy()
+        )));
+
+        debug!("p = {:?}", output_path);
+
+        // let output_path =
+    }
 
     // #[cfg(feature = "nope")]
     for (path, target) in saved_targets.targets.iter() {
         // let path = "test_images/frame_0000.jpg";
         // let target = (966.125, 431.0);
 
-        if !prev_misses.contains(path) {
-            continue;
-        }
+        // if !prev_misses.contains(path) {
+        //     continue;
+        // }
+
+        let output_path = {
+            let base = path.parent().unwrap();
+            let output_path = path.file_stem().unwrap();
+            base.join(Path::new("output")).join(Path::new(&format!(
+                "{}_output.jpg",
+                output_path.to_string_lossy()
+            )))
+        };
+
+        let path = path.to_str().unwrap();
 
         let mut image = image::open(path)?.into_rgb8();
 
@@ -103,7 +139,7 @@ pub fn main_tests() -> Result<()> {
 
         // debug!("Result: {:?}", result);
 
-        #[cfg(feature = "nope")]
+        // #[cfg(feature = "nope")]
         {
             // Create a clone of the OpenCV Mat for display
             let mut display_mat = mat.clone();
@@ -131,8 +167,9 @@ pub fn main_tests() -> Result<()> {
                     0,
                 )?;
 
-                let error_x = (target.0 - x).abs();
-                let error_y = (target.1 - y).abs();
+                let error_x = target.0 - x;
+                let error_y = target.1 - y;
+
                 errors.insert(path.to_string(), (error_x, error_y));
 
                 if result.is_none() {
@@ -166,8 +203,9 @@ pub fn main_tests() -> Result<()> {
                 misses.push(path.to_string());
             }
 
+            // debug!("Saving output to {:?}", output_path);
             // opencv::imgcodecs::imwrite(
-            //     &format!("test.jpg"),
+            //     output_path.to_str().unwrap(),
             //     &display_mat,
             //     &opencv::core::Vector::new(),
             // )
@@ -202,19 +240,36 @@ pub fn main_tests() -> Result<()> {
 
     let mut total_error = (0.0, 0.0);
 
+    let mut min_x: f64 = 1e100;
+    let mut min_y: f64 = 1e100;
+    let mut max_x: f64 = -1e100;
+    let mut max_y: f64 = -1e100;
+
     for (path, (error_x, error_y)) in errors.iter() {
-        total_error.0 += error_x;
-        total_error.1 += error_y;
+        total_error.0 += error_x.abs();
+        total_error.1 += error_y.abs();
+
+        // debug!("{}: ({:.1}, {:.1})", path, error_x, error_y);
+
+        min_x = min_x.min(*error_x);
+        min_y = min_y.min(*error_y);
+        max_x = max_x.max(*error_x);
+        max_y = max_y.max(*error_y);
     }
 
-    let total_error = (
+    let avg_error = (
         total_error.0 / errors.len() as f64,
         total_error.1 / errors.len() as f64,
     );
 
-    debug!("Total Error: {:.1}, {:.1}", total_error.0, total_error.1);
+    debug!("Average Error: {:.1}, {:.1}", avg_error.0, avg_error.1);
     debug!("Hits: {:?}", errors.len());
     debug!("Misses: {:?}", misses.len());
+
+    debug!("Min X: {:.3}", min_x);
+    debug!("Min Y: {:.3}", min_y);
+    debug!("Max X: {:.3}", max_x);
+    debug!("Max Y: {:.3}", max_y);
 
     for miss in misses.iter() {
         debug!("Miss: {}", miss);

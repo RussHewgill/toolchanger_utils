@@ -1,6 +1,6 @@
 use egui::Slider;
 
-use crate::vision::{CameraControl, WebcamCommand, WebcamSettings};
+use crate::vision::{CameraControl, VisionSettings, WebcamCommand};
 
 use super::ui_types::App;
 
@@ -10,7 +10,7 @@ impl App {
         let resp = ui.add(
             egui::Slider::new(
                 &mut self.webcam_settings.filter_step,
-                0..=WebcamSettings::NUM_FILTER_STEPS,
+                0..=VisionSettings::NUM_FILTER_STEPS,
             )
             .integer(),
         );

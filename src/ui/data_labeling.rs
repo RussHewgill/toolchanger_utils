@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 
 use super::ui_types::App;
 
@@ -13,5 +13,5 @@ pub struct DataLabeling {
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 pub struct SavedTargets {
     pub index: usize,
-    pub targets: HashMap<String, (f64, f64)>,
+    pub targets: HashMap<PathBuf, (f64, f64)>,
 }

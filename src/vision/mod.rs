@@ -33,7 +33,7 @@ pub fn spawn_locator_thread(
     index: usize,
     mut channel_from_ui: crossbeam_channel::Receiver<WebcamCommand>,
     channel_to_ui: crossbeam_channel::Sender<WebcamMessage>,
-    webcam_settings_mutex: Arc<Mutex<crate::vision::WebcamSettings>>,
+    webcam_settings_mutex: Arc<Mutex<crate::vision::VisionSettings>>,
     camera_size: (f64, f64),
 ) {
     std::thread::spawn(move || {
@@ -149,6 +149,7 @@ pub fn spawn_locator_thread(
                     Some(pos) => {
                         let mut path = format!("test_images/frame_{:0>4}.jpg", saved_targets.index);
                         debug!("Saving image to {}", path);
+                        let path = std::path::PathBuf::from(path);
                         assert!(!std::path::Path::new(&path).exists());
                         saved_targets.index += 1;
                         saved_targets.targets.insert(path.clone(), pos);

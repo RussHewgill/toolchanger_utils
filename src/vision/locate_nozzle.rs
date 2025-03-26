@@ -5,7 +5,7 @@ use tracing::{debug, error, info, trace, warn};
 
 use super::blob_detection::BlobDetectors;
 use super::utilities;
-use super::WebcamSettings;
+use super::VisionSettings;
 
 use opencv::{
     core::{Ptr, Size, Vec3f, Vector},
@@ -32,7 +32,7 @@ use opencv::{
 #[cfg(feature = "nope")]
 pub fn locate_nozzle(
     img0: &mut image::ImageBuffer<image::Rgb<u8>, Vec<u8>>,
-    settings: &WebcamSettings,
+    settings: &VisionSettings,
     detectors: &mut BlobDetectors,
 ) -> Result<(Mat, Option<(f64, f64, f64)>)> {
     // Convert image to opencv Mat
@@ -311,8 +311,8 @@ pub fn locate_nozzle(
 
 // #[cfg(feature = "nope")]
 pub fn locate_nozzle(
-    img0: &mut image::ImageBuffer<image::Rgb<u8>, Vec<u8>>,
-    settings: &WebcamSettings,
+    img0: &image::ImageBuffer<image::Rgb<u8>, Vec<u8>>,
+    settings: &VisionSettings,
     detectors: &mut BlobDetectors,
 ) -> Result<(Mat, Option<(f64, f64, f64)>)> {
     let mut img = utilities::imagebuffer_to_mat(img0)?;
@@ -463,7 +463,7 @@ pub fn locate_nozzle(
 
 pub fn preprocess_0(
     img: &Mat,
-    settings: &WebcamSettings,
+    settings: &VisionSettings,
     thresh_type: usize,
     save: bool,
 ) -> Result<(Mat, Mat)> {
@@ -506,7 +506,10 @@ pub fn preprocess_0(
     gaussian_blur(
         &img,
         &mut img2,
-        Size::new(settings.blur_kernel_size, settings.blur_kernel_size),
+        Size::new(
+            settings.blur_kernel_size as i32,
+            settings.blur_kernel_size as i32,
+        ),
         settings.blur_sigma,
         settings.blur_sigma,
         opencv::core::BorderTypes::BORDER_REPLICATE.into(),
@@ -533,7 +536,7 @@ pub fn preprocess_0(
             opencv::imgproc::ADAPTIVE_THRESH_GAUSSIAN_C.into(),
             ThresholdTypes::THRESH_BINARY.into(),
             // thresh,
-            settings.threshold_block_size * 2 + 1,
+            settings.threshold_block_size as i32 * 2 + 1,
             // settings.adaptive_threshold_c as f64,
             1.,
         )?;
@@ -580,7 +583,7 @@ pub fn preprocess_0(
 /// 1. Convert image to YUV color space, extract Y channel
 /// 2. Gaussian blur
 /// 3. Adaptive threshold
-pub fn preprocess_1(img: &Mat, settings: &WebcamSettings) -> Result<Mat> {
+pub fn preprocess_1(img: &Mat, settings: &VisionSettings) -> Result<Mat> {
     let mut img = img.clone();
     let mut img2 = img.clone();
 
@@ -629,7 +632,7 @@ pub fn preprocess_1(img: &Mat, settings: &WebcamSettings) -> Result<Mat> {
 /// 1. Convert image to grayscale
 /// 2. Threshold using triangle method (127, 255)
 /// 3. Apply Gaussian blur (7x7 kernel, 6 sigma)
-pub fn preprocess_2(img: &Mat, settings: &WebcamSettings) -> Result<Mat> {
+pub fn preprocess_2(img: &Mat, settings: &VisionSettings) -> Result<Mat> {
     let mut img = img.clone();
     let mut img2 = img.clone();
 
@@ -670,7 +673,7 @@ pub fn preprocess_2(img: &Mat, settings: &WebcamSettings) -> Result<Mat> {
 
 /// CLAHE, doesn't work well
 #[cfg(feature = "nope")]
-pub fn preprocess_2(img: &Mat, settings: &WebcamSettings) -> Result<Mat> {
+pub fn preprocess_2(img: &Mat, settings: &VisionSettings) -> Result<Mat> {
     let mut img = img.clone();
     let mut img2 = img.clone();
     let mut img_out = img.clone();

@@ -313,14 +313,14 @@ pub mod running_average {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct WebcamSettings {
+pub struct VisionSettings {
     // pub camera_index: usize,
     pub filter_step: usize,
     // pub threshold: i32,
-    pub blur_kernel_size: i32,
+    pub blur_kernel_size: u32,
     pub blur_sigma: f64,
     pub adaptive_threshold: bool,
-    pub threshold_block_size: i32,
+    pub threshold_block_size: u32,
     // pub adaptive_threshold_c: i32,
     /// 0: Binary Inv, 1: Binary Inv + Triangle, 2: Binary Inv + Otsu
     pub threshold_type: usize,
@@ -334,7 +334,7 @@ pub struct WebcamSettings {
     pub target_radius: f64,
 }
 
-impl WebcamSettings {
+impl VisionSettings {
     pub const NUM_FILTER_STEPS: usize = 4;
 
     // // pub const SIZE: (u32, u32) = (640, 480);
@@ -342,7 +342,7 @@ impl WebcamSettings {
     // pub const SIZE: (u32, u32) = (1280, 800);
 }
 
-impl Default for WebcamSettings {
+impl Default for VisionSettings {
     fn default() -> Self {
         Self {
             // crosshair_size: 0.5,

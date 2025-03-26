@@ -12,7 +12,9 @@ pub mod appconfig;
 pub mod klipper_protocol;
 pub mod logging;
 pub mod options;
+pub mod saved_data;
 pub mod tests;
+pub mod tuning;
 pub mod ui;
 pub mod vision;
 // pub mod webcam;
@@ -57,7 +59,7 @@ fn main() -> Result<()> {
     let mut detectors = vision::blob_detection::BlobDetectors::new().unwrap();
 
     let settings = {
-        let mut settings = vision::WebcamSettings::default();
+        let mut settings = vision::VisionSettings::default();
 
         settings.adaptive_threshold = false;
         settings.threshold_block_size = 3;
