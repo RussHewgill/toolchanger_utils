@@ -9,6 +9,8 @@ pub struct Options {
     pub printer_url: String,
     pub num_tools: usize,
     pub bounce_amount: f64,
+    pub camera_size: (f64, f64),
+    pub camera_scale: f64,
 }
 
 impl Default for Options {
@@ -18,6 +20,8 @@ impl Default for Options {
             printer_url: "".to_string(),
             num_tools: 4,
             bounce_amount: 0.5,
+            camera_size: (1280., 800.),
+            camera_scale: 1.0,
         }
     }
 }

@@ -1,13 +1,15 @@
 pub mod auto_offset;
+pub mod data_labeling;
 pub mod klipper_ui;
 pub mod ui_types;
+pub mod webcam_controls;
 
 use ui_types::*;
 
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use tracing::{debug, error, info, trace, warn};
 
-use egui::{Button, Color32, RichText};
+use egui::{Button, Color32, RichText, Vec2};
 use egui_extras::StripBuilder;
 
 use crate::vision::WebcamSettings;
@@ -94,7 +96,7 @@ impl App {
             let button = if self
                 .auto_offset
                 .as_ref()
-                .map(|a| a.single_tool())
+                .map(|a| a.single_tool() && a.check_repeatability().is_none())
                 .unwrap_or(false)
             {
                 button.fill(Color32::from_rgb(50, 158, 244))
@@ -133,6 +135,35 @@ impl App {
                     self.auto_offset = None;
                 }
             }
+
+            let button = egui::Button::new(RichText::new("Repeatability Test").size(16.));
+            let button = if self
+                .auto_offset
+                .as_ref()
+                .map(|a| a.check_repeatability().is_some())
+                .unwrap_or(false)
+            {
+                button.fill(Color32::from_rgb(50, 158, 244))
+            } else {
+                button
+            };
+            if ui.add(button).clicked() {
+                if self.auto_offset.is_none() {
+                    if let Some((x, y, _)) = self.get_position() {
+                        if let Some(t) = self.active_tool {
+                            debug!("Starting repeatability test");
+                            self.auto_offset =
+                                Some(crate::ui::auto_offset::AutoOffset::new_check_repeatability(
+                                    (x, y),
+                                    t as i32,
+                                    3,
+                                ));
+                        }
+                    }
+                } else {
+                    self.auto_offset = None;
+                }
+            }
         });
         ui.separator();
 
@@ -147,7 +178,7 @@ impl App {
                     .channel_to_vision
                     .as_mut()
                     .unwrap()
-                    .try_send(crate::vision::WebcamCommand::SaveScreenshot);
+                    .try_send(crate::vision::WebcamCommand::SaveScreenshot(None));
             }
         });
         ui.separator();
@@ -180,7 +211,7 @@ impl App {
                 };
 
                 if ui.add(but).clicked() {
-                    self.pickup_tool(t, true);
+                    self.pickup_tool(t as i32, true);
                     if let Some(pos) = self.camera_pos {
                         self.move_to_position(pos, true);
                     } else {
@@ -202,8 +233,13 @@ impl App {
                     )
                     .clicked()
                 {
-                    self.fetch_position();
-                    self.camera_pos = Some((x, y));
+                    if let Some((x, y, _)) = self.fetch_position() {
+                        self.camera_pos = Some((x, y));
+                        debug!("Camera position saved: ({:?}, {:?})", x, y);
+                    } else {
+                        self.errors.push("Failed to get position".to_string());
+                        self.camera_pos = None;
+                    }
                 }
 
                 if ui
@@ -252,23 +288,30 @@ impl App {
 
         /// Test positions
         ui.horizontal(|ui| {
+            #[cfg(feature = "nope")]
             let test_positions = [
-                (283.54, 25.13),
+                (283.9591, 25.84169999999999),
                 (284.16, 25.02),
                 (283.86, 23.52),
                 (284.36, 23.52),
                 //
             ];
 
-            for (i, pos) in test_positions.iter().enumerate() {
-                if ui
-                    .add(Button::new(RichText::new(format!("Pos {}", i)).size(15.)))
-                    .clicked()
-                {
-                    self.move_to_position(*pos, true);
+            let test_positions = [(0., 0.5), (0.5, 0.), (0.5, 0.5), (-1., -1.)];
+
+            if let Some(camera_pos) = self.camera_pos {
+                for (i, pos) in test_positions.iter().enumerate() {
+                    if ui
+                        .add(Button::new(RichText::new(format!("Pos {}", i)).size(15.)))
+                        .clicked()
+                    {
+                        let pos = (camera_pos.0 + pos.0, camera_pos.1 + pos.1);
+                        self.move_to_position(pos, true);
+                    }
                 }
             }
 
+            #[cfg(feature = "nope")]
             if ui
                 .add(Button::new(RichText::new("Test move (0.5, 0.5)").size(15.)))
                 .clicked()
@@ -519,6 +562,39 @@ impl App {
                     }
 
                     ui.end_row();
+                    ui.separator();
+                    ui.end_row();
+
+                    if let Some((_, tgt)) = self.data_labeling.target {
+                        ui.label(
+                            RichText::new(format!("Target: ({:.1}, {:.1})", tgt.x, tgt.y))
+                                .size(16.),
+                        );
+                    } else {
+                        ui.label(RichText::new("Target: ").size(16.));
+                    }
+
+                    ui.end_row();
+
+                    if let Some((x, y, radius)) = self.current_located_nozzle {
+                        ui.label(
+                            RichText::new(format!("Located: ({:.1}, {:.1}), {:.0}", x, y, radius))
+                                .size(16.),
+                        );
+                    } else {
+                        ui.label(RichText::new("Located: ").size(16.));
+                    }
+
+                    ui.end_row();
+
+                    ui.separator();
+                    ui.end_row();
+
+                    ui.label("Scale: ");
+                    ui.radio_value(&mut self.options.camera_scale, 0.5, "x0.5");
+                    ui.radio_value(&mut self.options.camera_scale, 1.0, "x1.0");
+
+                    ui.end_row();
 
                     ui.separator();
                     ui.end_row();
@@ -527,268 +603,150 @@ impl App {
                 });
             });
 
-            let texture = match &self.webcam_texture {
-                Some(texture) => texture,
-                None => {
-                    let image = egui::ColorImage::new([1280, 800], egui::Color32::from_gray(220));
-
-                    let texture =
-                        ui.ctx()
-                            .load_texture("camera_texture", image, Default::default());
-
-                    self.webcam_texture = Some(texture.clone());
-
-                    // crate::webcam::Webcam::spawn_thread(
-                    //     ui.ctx().clone(),
-                    //     texture.clone(),
-                    //     0,
-                    //     self.crosshair_circle_size.clone(),
-                    // );
-
-                    let (tx_to_ui, rx_to_ui) = crossbeam_channel::unbounded();
-                    self.channel_to_ui = Some(rx_to_ui);
-
-                    let (tx_to_vision, rx_to_vision) = crossbeam_channel::bounded(1);
-                    self.channel_to_vision = Some(tx_to_vision);
-
-                    crate::vision::spawn_locator_thread(
-                        ui.ctx().clone(),
-                        texture.clone(),
-                        0,
-                        rx_to_vision,
-                        tx_to_ui,
-                        self.webcam_settings_mutex.clone(),
-                    );
-
-                    &self.webcam_texture.as_ref().unwrap()
-                }
-            };
-
-            let size = egui::Vec2::new(
-                crate::webcam::Webcam::SIZE.0 as f32,
-                crate::webcam::Webcam::SIZE.1 as f32,
-                // 640., 480.,
-            );
-            // let size = size / 1.;
-            // let size = size / 2.;
-            let size = size / 1.5;
-
-            let img = egui::Image::from_texture((texture.id(), size))
-                .fit_to_exact_size(size)
-                .max_size(size)
-                // .rounding(egui::Rounding::same(4.))
-                .sense(egui::Sense::click());
-
-            let resp = ui.add(img);
+            self._webcam(ui);
         });
+        //
+    }
+
+    fn _webcam(&mut self, ui: &mut egui::Ui) {
+        let texture = match &self.webcam_texture {
+            Some(texture) => texture,
+            None => {
+                let image = egui::ColorImage::new([1280, 800], egui::Color32::from_gray(220));
+
+                let texture = ui
+                    .ctx()
+                    .load_texture("camera_texture", image, Default::default());
+
+                self.webcam_texture = Some(texture.clone());
+
+                let (tx_to_ui, rx_to_ui) = crossbeam_channel::unbounded();
+                self.channel_to_ui = Some(rx_to_ui);
+
+                let (tx_to_vision, rx_to_vision) = crossbeam_channel::bounded(10);
+                self.channel_to_vision = Some(tx_to_vision);
+
+                crate::vision::spawn_locator_thread(
+                    ui.ctx().clone(),
+                    texture.clone(),
+                    0,
+                    rx_to_vision,
+                    tx_to_ui,
+                    self.webcam_settings_mutex.clone(),
+                    self.options.camera_size,
+                );
+
+                &self.webcam_texture.as_ref().unwrap()
+            }
+        };
+
+        let size = egui::Vec2::new(
+            // crate::webcam::Webcam::SIZE.0 as f32,
+            // crate::webcam::Webcam::SIZE.1 as f32,
+            self.options.camera_size.0 as f32,
+            self.options.camera_size.1 as f32,
+        );
+        // let size = size / 1.;
+        // let size = size / 2.;
+        // let size = size / 1.5;
+        let size = size * self.options.camera_scale as f32;
+
+        let c = ui.cursor();
+        let img = egui::Image::from_texture((texture.id(), size))
+            .fit_to_exact_size(size)
+            .max_size(size)
+            // .rounding(egui::Rounding::same(4.))
+            .sense(egui::Sense::click());
+
+        let resp = ui.add(img);
+
+        if resp.clicked() {
+            if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+                if let Some(tool) = self.active_tool {
+                    // offset pos by cursor
+
+                    // debug!("c = {:?}", c.min);
+                    let pos = egui::Pos2::new(pos.x - c.min.x, pos.y - c.min.y);
+
+                    self.data_labeling.target = Some((tool, pos));
+                }
+            }
+        }
+
+        /// scroll to adjust pointer size
+        if resp.hovered() {
+            let delta = ui.input(|i| {
+                i.events.iter().find_map(|e| match e {
+                    egui::Event::MouseWheel {
+                        unit: _,
+                        delta,
+                        modifiers,
+                    } => Some(*delta),
+                    _ => None,
+                })
+            });
+            if let Some(delta) = delta {
+                if delta.y > 0. {
+                    self.webcam_settings.target_radius += 0.5;
+                } else if delta.y < 0. && self.webcam_settings.target_radius > 0. {
+                    self.webcam_settings.target_radius -= 0.5;
+                }
+            }
+        }
+
+        /// right click to save screenshot
+        if let Some((_, pos)) = self.data_labeling.target {
+            let painter = ui.painter_at(resp.rect);
+
+            let pos = pos + egui::Vec2::from([c.min.x, c.min.y]);
+
+            let radius = self.webcam_settings.target_radius as f32;
+
+            painter.circle_stroke(pos, radius, egui::Stroke::new(1.0, egui::Color32::RED));
+
+            painter.line(
+                vec![pos + Vec2::new(0., radius), pos + Vec2::new(0., -radius)],
+                egui::Stroke::new(1.0, egui::Color32::RED),
+            );
+
+            painter.line(
+                vec![pos + Vec2::new(radius, 0.), pos + Vec2::new(-radius, 0.)],
+                egui::Stroke::new(1.0, egui::Color32::RED),
+            );
+
+            if ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Secondary)) {
+                self.data_labeling.num_screens = 1;
+            }
+
+            if self.data_labeling.num_screens > 0 {
+                self.data_labeling.num_screens -= 1;
+
+                debug!("pos = ({:.1}, {:.1})", pos.x, pos.y);
+                debug!("c.min = ({:.1}, {:.1})", c.min.x, c.min.y);
+
+                let x = pos.x as f64 - c.min.x as f64;
+                let y = pos.y as f64 - c.min.y as f64;
+
+                let x = x / self.options.camera_scale;
+                let y = y / self.options.camera_scale;
+
+                self.channel_to_vision
+                    .as_mut()
+                    .unwrap()
+                    .try_send(crate::vision::WebcamCommand::SaveScreenshot(Some((x, y))))
+                    .unwrap_or_else(|e| {
+                        error!("Failed to send screenshot command: {}", e);
+                    });
+            }
+            //
+        }
+
         //
     }
 
     #[cfg(feature = "nope")]
     fn webcam_controls(&mut self, ui: &mut egui::Ui) {
         egui_probe::Probe::new(&mut self.webcam_settings).show(ui);
-
-        if self.webcam_settings != self.webcam_settings_prev {
-            let mut settings = self.webcam_settings_mutex.lock().unwrap();
-            *settings = self.webcam_settings;
-            self.webcam_settings_prev = self.webcam_settings.clone();
-        }
-    }
-
-    fn webcam_controls(&mut self, ui: &mut egui::Ui) {
-        ui.label("Filter Step");
-        let resp = ui.add(
-            egui::Slider::new(
-                &mut self.webcam_settings.filter_step,
-                0..=WebcamSettings::NUM_FILTER_STEPS,
-            )
-            .integer(),
-        );
-        if resp.hovered() {
-            let delta = ui.input(|i| {
-                i.events.iter().find_map(|e| match e {
-                    egui::Event::MouseWheel {
-                        unit: _,
-                        delta,
-                        modifiers,
-                    } => Some(*delta),
-                    _ => None,
-                })
-            });
-            if let Some(delta) = delta {
-                if delta.y > 0. {
-                    self.webcam_settings.filter_step += 1;
-                } else if delta.y < 0. && self.webcam_settings.filter_step > 0 {
-                    self.webcam_settings.filter_step -= 1;
-                }
-            }
-        }
-        ui.end_row();
-
-        ui.label("Pipeline");
-        let resp = ui
-            .add(egui::Slider::new(&mut self.webcam_settings.preprocess_pipeline, 0..=3).integer());
-        if resp.hovered() {
-            let delta = ui.input(|i| {
-                i.events.iter().find_map(|e| match e {
-                    egui::Event::MouseWheel {
-                        unit: _,
-                        delta,
-                        modifiers,
-                    } => Some(*delta),
-                    _ => None,
-                })
-            });
-            if let Some(delta) = delta {
-                if delta.y > 0. {
-                    self.webcam_settings.preprocess_pipeline += 1;
-                } else if delta.y < 0. && self.webcam_settings.preprocess_pipeline > 0 {
-                    self.webcam_settings.preprocess_pipeline -= 1;
-                }
-            }
-        }
-        ui.end_row();
-
-        // ui.label("Use Adaptive Threshold");
-        // ui.checkbox(&mut self.webcam_settings.adaptive_threshold, "");
-        // ui.end_row();
-
-        ui.label("Threshold Block Size");
-        let resp = ui.add(
-            egui::DragValue::new(&mut self.webcam_settings.threshold_block_size)
-                .speed(1.0)
-                .fixed_decimals(0)
-                .range(0..=255),
-            // egui::Slider::new(
-            //     &mut self.webcam_settings.adaptive_threshold_block_size,
-            //     1..=100,
-            // )
-            // // .step_by(2.0)
-            // .custom_formatter(|n, _| format!("{}", n * 2. + 1.)),
-        );
-        if resp.hovered() {
-            let delta = ui.input(|i| {
-                i.events.iter().find_map(|e| match e {
-                    egui::Event::MouseWheel {
-                        unit: _,
-                        delta,
-                        modifiers,
-                    } => Some(*delta),
-                    _ => None,
-                })
-            });
-            if let Some(delta) = delta {
-                if delta.y > 0. {
-                    self.webcam_settings.threshold_block_size += 2;
-                } else if delta.y < 0. {
-                    self.webcam_settings.threshold_block_size -= 2;
-                }
-            }
-        }
-        ui.end_row();
-
-        // ui.label("Adaptive Threshold C");
-        // ui.add(
-        //     egui::DragValue::new(&mut self.webcam_settings.adaptive_threshold_c)
-        //         .speed(0.1)
-        //         .fixed_decimals(1),
-        // );
-        // ui.end_row();
-
-        ui.label("Threshold Type");
-        let resp =
-            ui.add(egui::Slider::new(&mut self.webcam_settings.threshold_type, 0..=2).integer());
-
-        if resp.hovered() {
-            let delta = ui.input(|i| {
-                i.events.iter().find_map(|e| match e {
-                    egui::Event::MouseWheel {
-                        unit: _,
-                        delta,
-                        modifiers,
-                    } => Some(*delta),
-                    _ => None,
-                })
-            });
-            if let Some(delta) = delta {
-                if delta.y > 0. {
-                    self.webcam_settings.threshold_type += 1;
-                } else if delta.y < 0. && self.webcam_settings.threshold_type > 0 {
-                    self.webcam_settings.threshold_type -= 1;
-                }
-            }
-        }
-        ui.end_row();
-
-        ui.label("Blur Kernel Size");
-        let resp = ui.add(
-            egui::DragValue::new(&mut self.webcam_settings.blur_kernel_size)
-                .speed(1.0)
-                .fixed_decimals(0),
-        );
-        if resp.hovered() {
-            let delta = ui.input(|i| {
-                i.events.iter().find_map(|e| match e {
-                    egui::Event::MouseWheel {
-                        unit: _,
-                        delta,
-                        modifiers,
-                    } => Some(*delta),
-                    _ => None,
-                })
-            });
-            if let Some(delta) = delta {
-                if delta.y > 0. {
-                    self.webcam_settings.blur_kernel_size += 2;
-                } else if delta.y < 0. {
-                    self.webcam_settings.blur_kernel_size -= 2;
-                }
-            }
-        }
-        ui.end_row();
-
-        ui.label("Blur Sigma");
-        let resp = ui.add(
-            egui::DragValue::new(&mut self.webcam_settings.blur_sigma)
-                .speed(0.1)
-                .fixed_decimals(1),
-        );
-        if resp.hovered() {
-            let delta = ui.input(|i| {
-                i.events.iter().find_map(|e| match e {
-                    egui::Event::MouseWheel {
-                        unit: _,
-                        delta,
-                        modifiers,
-                    } => Some(*delta),
-                    _ => None,
-                })
-            });
-            if let Some(delta) = delta {
-                if delta.y > 0. {
-                    self.webcam_settings.blur_sigma += 0.25;
-                } else if delta.y < 0. {
-                    self.webcam_settings.blur_sigma -= 0.25;
-                }
-            }
-        }
-        ui.end_row();
-
-        ui.label("Draw Circle");
-        ui.checkbox(&mut self.webcam_settings.draw_circle, "");
-        ui.end_row();
-
-        ui.label("Use Hough");
-        ui.checkbox(&mut self.webcam_settings.use_hough, "");
-        ui.end_row();
-
-        ui.label("Pixels to mm");
-        ui.add(
-            egui::DragValue::new(&mut self.webcam_settings.pixels_per_mm)
-                .speed(0.1)
-                .fixed_decimals(2),
-        );
-        ui.end_row();
 
         if self.webcam_settings != self.webcam_settings_prev {
             let mut settings = self.webcam_settings_mutex.lock().unwrap();
@@ -819,18 +777,23 @@ impl eframe::App for App {
                         // debug!("Found nozzle: {:?}", pos);
                         // self.running_average.push_position((pos.0, pos.1));
                         self.running_average.add_frame(Some(pos));
+                        self.current_located_nozzle = Some(pos);
                     }
                     crate::vision::WebcamMessage::NozzleNotFound => {
                         // debug!("Nozzle not found");
-                        self.running_average.add_frame(None)
+                        self.running_average.add_frame(None);
+                        self.current_located_nozzle = None;
                     }
                 }
             }
         }
 
         egui::TopBottomPanel::top("tabs").show(ctx, |ui| {
-            ui.selectable_value(&mut self.current_tab, Tab::Webcam, "Webcam");
-            ui.selectable_value(&mut self.current_tab, Tab::Options, "Options");
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.current_tab, Tab::Webcam, "Webcam");
+                // ui.selectable_value(&mut self.current_tab, Tab::DataLabeling, "Data Labeling");
+                ui.selectable_value(&mut self.current_tab, Tab::Options, "Options");
+            });
         });
 
         match self.current_tab {

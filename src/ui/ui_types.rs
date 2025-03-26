@@ -55,17 +55,28 @@ pub struct App {
 
     #[serde(skip)]
     pub auto_offset: Option<crate::ui::auto_offset::AutoOffset>,
+
+    #[serde(skip)]
+    pub data_labeling: crate::ui::data_labeling::DataLabeling,
+
+    #[serde(skip)]
+    pub current_located_nozzle: Option<(f64, f64, f64)>,
+
+    #[serde(skip)]
+    pub camera_settings: crate::vision::CameraSettings,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub enum Tab {
     Webcam,
     Options,
+    // DataLabeling,
 }
 
 impl Default for Tab {
     fn default() -> Self {
         Tab::Webcam
+        // Tab::DataLabeling
     }
 }
 

@@ -325,12 +325,13 @@ pub fn locate_nozzle(
         let value = ((i as f64 / 255.0).powf(1.0 / gamma) * 255.0) as u8;
         *lut.at_mut::<u8>(i)? = value;
     }
-
     opencv::core::lut(&img, &lut, &mut img2)?;
     std::mem::swap(&mut img, &mut img2);
 
-    let (mut img_out, mat0) = preprocess_0(&img, settings, 0)?;
-    let (_, mat1) = preprocess_0(&img, settings, 1)?;
+    opencv::imgcodecs::imwrite(&format!("test0.jpg"), &img, &opencv::core::Vector::new()).unwrap();
+
+    let (mut img_out, mat0) = preprocess_0(&img, settings, 0, true)?;
+    let (_, mat1) = preprocess_0(&img, settings, 1, false)?;
     // let mat1 = preprocess_1(&img, settings)?;
     // let mat2 = preprocess_2(&img, settings)?;
     drop(img);
@@ -351,40 +352,44 @@ pub fn locate_nozzle(
 
         let mut color = opencv::core::Scalar::new(0., 255., 0., 0.);
 
+        /// Combo 1: preprocess 0 (binary) + Standard
         detectors
             .standard
             .detect(&mat0, &mut detectors.keypoints, &opencv::core::no_array())?;
+        if detectors.keypoints.len() > 0 {
+            color = opencv::core::Scalar::new(0., 255., 0., 0.);
+        }
 
+        /// Combo 2: preprocess 1 (binary + triangle) + Standard
         if detectors.keypoints.len() == 0 {
             detectors.standard.detect(
                 &mat1,
                 &mut detectors.keypoints,
                 &opencv::core::no_array(),
             )?;
-        } else {
-            // debug!("mat0: found {}", detectors.keypoints.len());
+            if detectors.keypoints.len() > 0 {
+                color = opencv::core::Scalar::new(255., 255., 0., 0.); // yellow
+            }
         }
 
-        if detectors.keypoints.len() > 0 {
-            // debug!("mat1: found {}", detectors.keypoints.len());
+        /// Combo 2: preprocess 0 (binary) + Relaxed
+        if detectors.keypoints.len() == 0 {
+            detectors
+                .relaxed
+                .detect(&mat0, &mut detectors.keypoints, &opencv::core::no_array())?;
+            if detectors.keypoints.len() > 0 {
+                color = opencv::core::Scalar::new(0., 0., 255., 0.);
+            }
         }
 
+        /// Combo 3: preprocess 1 (binary + triangle) + Relaxed
         if detectors.keypoints.len() == 0 {
             detectors
                 .relaxed
                 .detect(&mat1, &mut detectors.keypoints, &opencv::core::no_array())?;
             if detectors.keypoints.len() > 0 {
-                // debug!(
-                //     "Relaxed detector found {} keypoints",
-                //     detectors.keypoints.len()
-                // );
-                color = opencv::core::Scalar::new(0., 0., 255., 0.);
+                color = opencv::core::Scalar::new(255., 0., 0., 0.); // red
             }
-        } else {
-            // debug!(
-            //     "Standard detector found {} keypoints",
-            //     detectors.keypoints.len()
-            // );
         }
 
         // if detectors.keypoints.len() == 0 {
@@ -460,6 +465,7 @@ pub fn preprocess_0(
     img: &Mat,
     settings: &WebcamSettings,
     thresh_type: usize,
+    save: bool,
 ) -> Result<(Mat, Mat)> {
     let mut img = img.clone();
     let mut img2 = img.clone();
@@ -486,6 +492,11 @@ pub fn preprocess_0(
     let y = yuv.get(0).unwrap();
     img = y.clone();
 
+    if save {
+        opencv::imgcodecs::imwrite(&format!("test1.jpg"), &img, &opencv::core::Vector::new())
+            .unwrap();
+    }
+
     if settings.filter_step == 1 {
         // debug!("Filter step is 1, returning luma channel");
         img_out = img.clone();
@@ -502,6 +513,11 @@ pub fn preprocess_0(
         opencv::core::AlgorithmHint::ALGO_HINT_DEFAULT,
     )?;
     std::mem::swap(&mut img, &mut img2);
+
+    if save {
+        opencv::imgcodecs::imwrite(&format!("test2.jpg"), &img, &opencv::core::Vector::new())
+            .unwrap();
+    }
 
     if settings.filter_step == 2 {
         // debug!("Filter step is 2, returning blurred image");
@@ -547,6 +563,11 @@ pub fn preprocess_0(
         )?;
     }
     std::mem::swap(&mut img, &mut img2);
+
+    if save {
+        opencv::imgcodecs::imwrite(&format!("test3.jpg"), &img, &opencv::core::Vector::new())
+            .unwrap();
+    }
 
     if settings.filter_step == 3 {
         // debug!("Filter step is 3, returning thresholded image");

@@ -25,7 +25,7 @@ use opencv::{
 };
 
 pub use self::vision_types::*;
-use crate::webcam::Webcam;
+use crate::ui::data_labeling::SavedTargets;
 
 pub fn spawn_locator_thread(
     ctx: egui::Context,
@@ -34,6 +34,7 @@ pub fn spawn_locator_thread(
     mut channel_from_ui: crossbeam_channel::Receiver<WebcamCommand>,
     channel_to_ui: crossbeam_channel::Sender<WebcamMessage>,
     webcam_settings_mutex: Arc<Mutex<crate::vision::WebcamSettings>>,
+    camera_size: (f64, f64),
 ) {
     std::thread::spawn(move || {
         let format =
@@ -43,7 +44,8 @@ pub fn spawn_locator_thread(
             nokhwa::Camera::new(nokhwa::utils::CameraIndex::Index(index as u32), format).unwrap();
 
         let format = CameraFormat::new(
-            nokhwa::utils::Resolution::new(Webcam::SIZE.0, Webcam::SIZE.1),
+            // nokhwa::utils::Resolution::new(Webcam::SIZE.0, Webcam::SIZE.1),
+            nokhwa::utils::Resolution::new(camera_size.0 as u32, camera_size.1 as u32),
             nokhwa::utils::FrameFormat::MJPEG,
             30,
         );
@@ -52,23 +54,64 @@ pub fn spawn_locator_thread(
 
         camera.set_camera_requset(format).unwrap();
 
+        // // Control: Brightness
+        // // Control: Contrast
+        // // Control: Hue
+        // // Control: Saturation
+        // // Control: Sharpness
+        // // Control: Gamma
+        // // Control: WhiteBalance
+        // // Control: BacklightComp
+        // // Control: Pan
+        // // Control: Tilt
+        // // Control: Zoom
+        // // Control: Exposure
+        // let controls = camera.supported_camera_controls().unwrap();
+        // for control in controls {
+        //     debug!("Control: {:?}", control);
+        // }
+
         // for f in camera.compatible_camera_formats().unwrap() {
         //     debug!("Compatible format: {:?}", f);
         // }
 
         let mut buffer: image::ImageBuffer<image::Rgb<u8>, Vec<u8>> =
-            image::ImageBuffer::new(Webcam::SIZE.0 as u32, Webcam::SIZE.1 as u32);
+            // image::ImageBuffer::new(Webcam::SIZE.0 as u32, Webcam::SIZE.1 as u32);
+            image::ImageBuffer::new(camera_size.0 as u32, camera_size.1 as u32);
 
         let mut detectors = BlobDetectors::new().unwrap();
 
         let mut n = 0;
 
-        let mut commands = VecDeque::new();
+        let mut commands: VecDeque<WebcamCommand> = VecDeque::new();
+        let mut screenshots = VecDeque::new();
+
+        let mut saved_targets = {
+            let path = "test_images/saved_targets.toml";
+            if let Ok(s) = std::fs::read_to_string(&path) {
+                let saved_targets: SavedTargets = toml::from_str(&s).unwrap();
+                saved_targets
+            } else {
+                SavedTargets::default()
+            }
+        };
 
         eprintln!("Starting camera loop");
         loop {
             while let Ok(cmd) = channel_from_ui.try_recv() {
-                commands.push_back(cmd);
+                match cmd {
+                    WebcamCommand::SaveScreenshot(s) => {
+                        screenshots.push_back(s);
+                    }
+                    WebcamCommand::SetCameraControl(cmd) => {
+                        let c = cmd.to_control();
+
+                        let control = camera.camera_control(c.0).unwrap();
+                        // debug!("Control: {:?}", control);
+
+                        camera.set_camera_control(c.0, c.1).unwrap();
+                    }
+                }
             }
 
             std::thread::sleep(std::time::Duration::from_millis(34));
@@ -87,10 +130,9 @@ pub fn spawn_locator_thread(
                 .decode_image_to_buffer::<RgbFormat>(&mut buffer)
                 .unwrap();
 
-            if let Some(cmd) = commands.get(0) {
+            if let Some(cmd) = screenshots.pop_front() {
                 match cmd {
-                    WebcamCommand::SaveScreenshot => {
-                        commands.pop_front();
+                    None => {
                         let mut path = format!("test_images/frame_{:0>4}.jpg", n);
                         if std::path::Path::new(&path).exists() {
                             // increment n until we find a free name
@@ -103,6 +145,20 @@ pub fn spawn_locator_thread(
                         debug!("Saving image to {}", path);
 
                         buffer.save(path).unwrap();
+                    }
+                    Some(pos) => {
+                        let mut path = format!("test_images/frame_{:0>4}.jpg", saved_targets.index);
+                        debug!("Saving image to {}", path);
+                        assert!(!std::path::Path::new(&path).exists());
+                        saved_targets.index += 1;
+                        saved_targets.targets.insert(path.clone(), pos);
+
+                        buffer.save(path).unwrap();
+
+                        // save saved_targets to toml file
+                        let path = "test_images/saved_targets.toml";
+                        let s = toml::to_string(&saved_targets).unwrap();
+                        std::fs::write(path, s).unwrap();
                     }
                 }
             }
@@ -159,11 +215,11 @@ pub fn spawn_locator_thread(
                             .send(WebcamMessage::FoundNozzle(circle))
                             .is_err()
                         {
-                            eprintln!("Failed to send message to UI");
+                            debug!("Failed to send message to UI");
                         }
                     } else {
                         if channel_to_ui.send(WebcamMessage::NozzleNotFound).is_err() {
-                            eprintln!("Failed to send message to UI");
+                            debug!("Failed to send message to UI");
                         }
                     }
                 }
@@ -233,7 +289,7 @@ pub fn spawn_locator_thread(
                 buffer.as_flat_samples().as_slice(),
             );
 
-            crate::webcam::draw_crosshair(settings.crosshair_size, &mut img);
+            crate::ui::webcam_controls::draw_crosshair(settings.crosshair_size, &mut img);
 
             handle.set(img, Default::default());
 

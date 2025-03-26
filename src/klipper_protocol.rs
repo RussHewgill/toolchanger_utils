@@ -15,6 +15,9 @@ pub struct KlipperProtocol {
 
     position: Option<(f64, f64, f64)>,
     // camera_pos: Option<(f64, f64)>,
+    position_stale: bool,
+
+    z_height: f64,
 }
 
 impl KlipperProtocol {
@@ -32,11 +35,21 @@ impl KlipperProtocol {
 
             position: None,
             // camera_pos: None,
+            position_stale: true,
+
+            // z_height: 30.,
+            z_height: 33.51,
         })
     }
 
-    pub fn get_position(&self) -> Option<(f64, f64, f64)> {
-        self.position
+    pub fn get_position(&mut self) -> Result<Option<(f64, f64, f64)>> {
+        if self.position_stale {
+            let pos = self.fetch_position()?;
+            self.position_stale = false;
+            Ok(Some(pos))
+        } else {
+            Ok(self.position)
+        }
     }
 
     pub fn fetch_position(&mut self) -> Result<(f64, f64, f64)> {
@@ -91,8 +104,8 @@ impl KlipperProtocol {
     }
 
     pub fn move_to_position(&mut self, pos: (f64, f64), bounce: Option<f64>) -> Result<()> {
-        let gcode = "G1 Z30";
-        self.run_gcode(&gcode, false)?;
+        let z_gcode = format!("G1 Z{:.2}", self.z_height);
+        self.run_gcode(&z_gcode)?;
 
         let x = pos.0;
         let y = pos.1;
@@ -100,12 +113,12 @@ impl KlipperProtocol {
         if let Some(bounce_amount) = bounce {
             let gcode = format!("G1 X{} Y{}", x - bounce_amount, y - bounce_amount);
             debug!("Running gcode 0: {}", gcode);
-            self.run_gcode(&gcode, false)?;
+            self.run_gcode(&gcode)?;
         }
 
         let gcode = format!("G1 X{} Y{}", x, y);
         debug!("Running gcode 1: {}", gcode);
-        self.run_gcode(&gcode, true)?;
+        self.run_gcode(&gcode)?;
 
         Ok(())
     }
@@ -141,33 +154,33 @@ impl KlipperProtocol {
             debug!("m0 = {}", m0);
             debug!("m1 = {}", m1);
 
-            self.run_gcode(&format!("_CLIENT_LINEAR_MOVE {}={}", axis, m0), false)?;
-            self.run_gcode(&format!("_CLIENT_LINEAR_MOVE {}={}", axis, m1), true)?;
+            self.run_gcode(&format!("_CLIENT_LINEAR_MOVE {}={}", axis, m0))?;
+            self.run_gcode(&format!("_CLIENT_LINEAR_MOVE {}={}", axis, m1))?;
         } else {
-            self.run_gcode(&format!("_CLIENT_LINEAR_MOVE {}={}", axis, amount), true)?;
+            self.run_gcode(&format!("_CLIENT_LINEAR_MOVE {}={}", axis, amount))?;
         }
         Ok(())
     }
 
     pub fn home_xy(&mut self) -> Result<()> {
-        self.run_gcode("G28 X Y", true)?;
+        self.run_gcode("G28 X Y")?;
         Ok(())
     }
 
     pub fn home_all(&mut self) -> Result<()> {
-        self.run_gcode("G28", true)?;
+        self.run_gcode("G28")?;
         Ok(())
     }
 
     pub fn pick_tool(&mut self, tool: usize) -> Result<()> {
         let gcode = format!("T{}", tool);
-        self.run_gcode(&gcode, true)?;
+        self.run_gcode(&gcode)?;
         Ok(())
     }
 
     pub fn dropoff_tool(&mut self) -> Result<()> {
         let gcode = "T_1";
-        self.run_gcode(&gcode, true)?;
+        self.run_gcode(&gcode)?;
         Ok(())
     }
 
@@ -207,7 +220,7 @@ impl KlipperProtocol {
             tool, axis, amount
         );
 
-        self.run_gcode(&gcode, true)?;
+        self.run_gcode(&gcode)?;
 
         Ok(())
     }
@@ -235,7 +248,7 @@ impl KlipperProtocol {
     }
 
     // fn run_gcode(&mut self, gcode: &str) -> Result<()> {
-    pub fn run_gcode(&mut self, gcode: &str, get_pos: bool) -> Result<()> {
+    pub fn run_gcode(&mut self, gcode: &str) -> Result<()> {
         let mut map = HashMap::new();
         map.insert("script", gcode);
 
@@ -251,9 +264,10 @@ impl KlipperProtocol {
 
         let res = res.status();
         if res.is_success() {
-            if get_pos {
-                self.fetch_position()?;
-            }
+            // if get_pos {
+            //     self.fetch_position()?;
+            // }
+            self.position_stale = true;
             Ok(())
         } else {
             bail!("Failed to run G-code: {}", res)

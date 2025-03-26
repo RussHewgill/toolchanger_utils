@@ -28,9 +28,11 @@ impl BlobDetectors {
             // min_area: 400.0,
             // max_area: 900.0,
             // max_area: 15000.0,
-            min_area: std::f32::consts::PI * 40.0f32.powi(2), // ~5000
-            // min_area: std::f32::consts::PI * 20.0f32.powi(2), // ~1250
-            max_area: std::f32::consts::PI * 100.0f32.powi(2), // 30_000
+            min_area: std::f32::consts::PI * 20.0f32.powi(2), // ~1250
+            // min_area: std::f32::consts::PI * 38.0f32.powi(2), // ~4500
+            // max_area: std::f32::consts::PI * 100.0f32.powi(2), // 30_000
+            // max_area: std::f32::consts::PI * 70.0f32.powi(2), // ~15400
+            max_area: std::f32::consts::PI * 50.0f32.powi(2), // ~7800
 
             /// Filter by circularity
             filter_by_circularity: true,

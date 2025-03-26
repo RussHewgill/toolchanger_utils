@@ -12,10 +12,6 @@ pub struct Webcam {
 }
 
 impl Webcam {
-    // pub const SIZE: (u32, u32) = (640, 480);
-    // pub const SIZE: (u32, u32) = (320, 240);
-    pub const SIZE: (u32, u32) = (1280, 800);
-
     pub fn spawn_thread(
         ctx: egui::Context,
         mut handle: egui::TextureHandle,
@@ -117,78 +113,5 @@ impl Webcam {
 
             //
         });
-    }
-}
-
-pub fn draw_crosshair(radius: f32, img: &mut egui::ColorImage) {
-    let width = img.width();
-    let height = img.height();
-
-    // Center coordinates
-    let center_x = width / 2;
-    let center_y = height / 2;
-
-    // Crosshair size (length of each line from center)
-    let line_length = width.min(height) / 20;
-
-    // Crosshair color (bright green for visibility)
-    let color = egui::Color32::from_rgb(255, 255, 0);
-
-    for x in 0..width {
-        img.pixels[x as usize + center_y * width as usize] = color;
-    }
-
-    for y in 0..height {
-        img.pixels[center_x as usize + y * width as usize] = color;
-    }
-
-    // Draw circle outline
-    // let radius = 100.;
-
-    // Use Bresenham's circle algorithm
-    let mut x = 0;
-    let mut y = radius as i32;
-    let mut d = 3 - 2 * (radius as i32);
-
-    while y >= x {
-        // Draw the eight octants
-        draw_circle_points(img, center_x, center_y, x, y, color, width);
-
-        if d > 0 {
-            y -= 1;
-            d += 4 * (x - y) + 10;
-        } else {
-            d += 4 * x + 6;
-        }
-        x += 1;
-    }
-}
-
-// Helper function to draw the eight points of a circle at once
-fn draw_circle_points(
-    img: &mut egui::ColorImage,
-    center_x: usize,
-    center_y: usize,
-    x: i32,
-    y: i32,
-    color: egui::Color32,
-    width: usize,
-) {
-    let points = [
-        (center_x + x as usize, center_y + y as usize),
-        (center_x - x as usize, center_y + y as usize),
-        (center_x + x as usize, center_y - y as usize),
-        (center_x - x as usize, center_y - y as usize),
-        (center_x + y as usize, center_y + x as usize),
-        (center_x - y as usize, center_y + x as usize),
-        (center_x + y as usize, center_y - x as usize),
-        (center_x - y as usize, center_y - x as usize),
-    ];
-
-    for (px, py) in points {
-        // Check bounds before drawing
-        if px < img.width() && py < img.height() {
-            img.pixels[px + py * width] = color;
-        }
     }
 }

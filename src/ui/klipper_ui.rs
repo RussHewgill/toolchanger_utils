@@ -34,7 +34,7 @@ impl App {
             return None;
         };
 
-        klipper.get_position()
+        klipper.get_position().unwrap()
     }
 
     pub fn fetch_position(&mut self) -> Option<(f64, f64, f64)> {
@@ -42,6 +42,13 @@ impl App {
             debug!("klipper is not connected");
             return None;
         };
+
+        // if let Some((x, y, z)) = klipper.fetch_position() {
+        //     klipper.position = Some((x, y));
+        //     Some((x, y, z))
+        // } else {
+        //     None
+        // }
 
         klipper.fetch_position().ok()
     }
@@ -62,7 +69,7 @@ impl App {
         ) {
             error!("Failed to move to position: {}", e);
         }
-        self.fetch_position();
+        // self.fetch_position();
     }
 
     pub fn move_relative(&mut self, amount: (f64, f64), bounce: bool) {
@@ -90,7 +97,7 @@ impl App {
             error!("Failed to move to position: {}", e);
         }
 
-        self.fetch_position();
+        // self.fetch_position();
     }
 
     pub fn move_axis_relative(&mut self, axis: Axis, amount: f64, bounce: bool) {
@@ -102,7 +109,7 @@ impl App {
         if let Err(e) = klipper.move_axis_relative(axis, amount, bounce) {
             error!("Failed to move axis: {}", e);
         }
-        self.fetch_position();
+        // self.fetch_position();
     }
 
     pub fn dropoff_tool(&mut self) {
@@ -116,19 +123,24 @@ impl App {
         } else {
             self.active_tool = None;
         }
-        self.fetch_position();
+        // self.fetch_position();
     }
 
-    pub fn pickup_tool(&mut self, tool: usize, move_to_camera: bool) {
+    pub fn pickup_tool(&mut self, tool: i32, move_to_camera: bool) {
+        if tool < 0 {
+            error!("Invalid tool number: {}", tool);
+            return;
+        }
+
         let Some(klipper) = &mut self.klipper else {
             debug!("klipper is not connected");
             return;
         };
 
-        if let Err(e) = klipper.pick_tool(tool) {
+        if let Err(e) = klipper.pick_tool(tool as usize) {
             error!("Failed to pick up tool: {}", e);
         } else {
-            self.active_tool = Some(tool);
+            self.active_tool = Some(tool as usize);
         }
 
         if move_to_camera {
@@ -143,7 +155,7 @@ impl App {
                 error!("Failed to move to camera position: {}", e);
             }
         }
-        self.fetch_position();
+        // self.fetch_position();
     }
 
     pub fn adjust_offset_from_camera(&mut self, tool: usize, (x, y): (f64, f64)) {

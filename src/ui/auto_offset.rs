@@ -3,7 +3,7 @@ use tracing::{debug, error, info, trace, warn};
 
 use std::time::Instant;
 
-use crate::{klipper_protocol::KlipperProtocol, webcam::Webcam};
+use crate::{klipper_protocol::KlipperProtocol, vision::WebcamSettings};
 
 use super::ui_types::{App, Axis};
 
@@ -13,6 +13,9 @@ pub struct AutoOffset {
     last_move: Instant,
     single_tool: bool,
     current_tool: i32,
+
+    check_repeatability: Option<usize>,
+    repeatability: Vec<(f64, f64)>,
 }
 
 impl AutoOffset {
@@ -22,6 +25,21 @@ impl AutoOffset {
             last_move: Instant::now(),
             single_tool,
             current_tool: -1,
+
+            check_repeatability: None,
+            repeatability: Vec::new(),
+        }
+    }
+
+    pub fn new_check_repeatability(pos: (f64, f64), tool: i32, n: usize) -> Self {
+        Self {
+            prev_position: pos,
+            last_move: Instant::now(),
+            single_tool: true,
+            current_tool: tool,
+
+            check_repeatability: Some(n),
+            repeatability: Vec::new(),
         }
     }
 
@@ -31,6 +49,50 @@ impl AutoOffset {
 
     pub fn single_tool(&self) -> bool {
         self.single_tool
+    }
+
+    pub fn check_repeatability(&self) -> Option<usize> {
+        self.check_repeatability
+    }
+
+    pub fn process_repeatibility(&self) {
+        debug!("Repeatability results:");
+
+        let mut xs = self
+            .repeatability
+            .iter()
+            .map(|(x, _)| *x)
+            .collect::<Vec<_>>();
+        let mut ys = self
+            .repeatability
+            .iter()
+            .map(|(_, y)| *y)
+            .collect::<Vec<_>>();
+
+        /// calculate median:
+        xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        ys.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        let median_x = xs[xs.len() / 2];
+        let median_y = ys[ys.len() / 2];
+
+        debug!("Median: ({:.3}, {:.3})", median_x, median_y);
+
+        /// use the median as the center point
+        let xs = self
+            .repeatability
+            .iter()
+            .map(|(x, _)| x - median_x)
+            .collect::<Vec<_>>();
+        let ys = self
+            .repeatability
+            .iter()
+            .map(|(_, y)| y - median_y)
+            .collect::<Vec<_>>();
+
+        // for (i, (x, y)) in self.repeatability.iter().enumerate() {
+        //     debug!("{}: ({:.3}, {:.3})", i, x, y);
+        // }
     }
 }
 
@@ -50,15 +112,6 @@ impl App {
         ui: &mut egui::Ui,
         mut auto_offset: AutoOffset,
     ) -> Option<AutoOffset> {
-        // let Some(auto_offset) = self.auto_offset.as_mut() else {
-        //     return;
-        // };
-
-        // let some(klipper) = &mut self.klipper else {
-        //     debug!("klipper is not connected");
-        //     return none;
-        // };
-
         /// if we are doing all tools, and it's the first run, dropoff the tool and pickup tool 0
         if !auto_offset.single_tool && auto_offset.current_tool < 0 {
             /// XXX: dropoff the tool first?
@@ -84,7 +137,12 @@ impl App {
             return Some(auto_offset);
         }
 
-        let center = (Webcam::SIZE.0 as f64 / 2., Webcam::SIZE.1 as f64 / 2.);
+        let center = (
+            // WebcamSettings::SIZE.0 as f64 / 2.,
+            // WebcamSettings::SIZE.1 as f64 / 2.,
+            (self.options.camera_size.0 * self.options.camera_scale) / 2.,
+            (self.options.camera_size.1 * self.options.camera_scale) / 2.,
+        );
 
         let offset_x = median.0 - center.0;
         let offset_y = median.1 - center.1;
@@ -117,9 +175,36 @@ impl App {
 
             auto_offset.last_move = Instant::now();
         } else {
-            if auto_offset.single_tool {
+            /// nozzle is centered
+            if auto_offset.single_tool && auto_offset.check_repeatability.is_none() {
                 // nozzle is centered, halt auto offset
                 return None;
+            } else if let Some(n) = auto_offset.check_repeatability {
+                debug!("repeatibility check: {}", n);
+
+                let Some((x, y, _)) = self.get_position() else {
+                    error!("Failed to get position");
+                    return Some(auto_offset);
+                };
+
+                auto_offset.repeatability.push((x, y));
+
+                let t = auto_offset.current_tool;
+
+                // debug!("Dropping off tool {}", t);
+
+                self.dropoff_tool();
+                self.pickup_tool(t, true);
+
+                if n == 0 {
+                    auto_offset.process_repeatibility();
+
+                    return None;
+                }
+
+                auto_offset.check_repeatability = Some(n - 1);
+
+                //
             } else {
                 // if we are doing all tools:
                 // apply offsets
@@ -139,7 +224,7 @@ impl App {
 
                 if auto_offset.current_tool < self.options.num_tools as i32 {
                     auto_offset.current_tool += 1;
-                    self.pickup_tool(auto_offset.current_tool as usize, true);
+                    self.pickup_tool(auto_offset.current_tool, true);
                 }
             }
         }

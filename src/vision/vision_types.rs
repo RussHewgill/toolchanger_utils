@@ -2,6 +2,8 @@
 
 use std::collections::VecDeque;
 
+use nokhwa::utils::{ControlValueSetter, KnownCameraControl};
+
 // pub use self::running_average::*;
 pub use self::circle_aggregator::*;
 
@@ -17,7 +19,8 @@ pub enum NozzlePosition {
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WebcamCommand {
-    SaveScreenshot,
+    SaveScreenshot(Option<(f64, f64)>),
+    SetCameraControl(CameraControl),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -25,6 +28,86 @@ pub enum WebcamMessage {
     /// X, Y, radius
     FoundNozzle((f64, f64, f64)),
     NozzleNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CameraSettings {
+    pub brightness: i64,
+    pub contrast: i64,
+    // pub hue: i64,
+    pub saturation: i64,
+    pub sharpness: i64,
+    pub gamma: i64,
+    pub white_balance: i64,
+    pub backlight_comp: i64,
+}
+
+impl Default for CameraSettings {
+    fn default() -> Self {
+        Self {
+            brightness: 0,
+            contrast: 38,
+            // hue: 0,
+            saturation: 64,
+            sharpness: 93,
+            gamma: 400,
+            white_balance: 4600,
+            backlight_comp: 1,
+            // pan: 0,
+            // tilt: 0,
+            // zoom: 0,
+            // exposure: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum CameraControl {
+    Brightness(i64),
+    Contrast(i64),
+    // Hue(i64),
+    Saturation(i64),
+    Sharpness(i64),
+    Gamma(i64),
+    WhiteBalance(i64),
+    BacklightComp(i64),
+    // Pan(i64),
+    // Tilt(i64),
+    // Zoom(i64),
+    // Exposure(i64),
+}
+
+impl CameraControl {
+    // pub fn to_control(&self) -> (KnownCameraControl, ControlValueSetter)
+    pub fn to_control(&self) -> (KnownCameraControl, ControlValueSetter) {
+        match self {
+            CameraControl::Brightness(v) => (
+                KnownCameraControl::Brightness,
+                ControlValueSetter::Integer(*v),
+            ),
+            CameraControl::Contrast(v) => (
+                KnownCameraControl::Contrast,
+                ControlValueSetter::Integer(*v),
+            ),
+            CameraControl::Saturation(v) => (
+                KnownCameraControl::Saturation,
+                ControlValueSetter::Integer(*v),
+            ),
+            CameraControl::Sharpness(v) => (
+                KnownCameraControl::Sharpness,
+                ControlValueSetter::Integer(*v),
+            ),
+            CameraControl::Gamma(v) => (KnownCameraControl::Gamma, ControlValueSetter::Integer(*v)),
+            CameraControl::WhiteBalance(v) => (
+                KnownCameraControl::WhiteBalance,
+                ControlValueSetter::Integer(*v),
+            ),
+            CameraControl::BacklightComp(v) => (
+                KnownCameraControl::BacklightComp,
+                ControlValueSetter::Integer(*v),
+            ),
+        }
+    }
 }
 
 // #[cfg(feature = "nope")]
@@ -248,10 +331,15 @@ pub struct WebcamSettings {
     // pub mirror: (bool, bool),
     // pub rotate: usize,
     pub preprocess_pipeline: usize,
+    pub target_radius: f64,
 }
 
 impl WebcamSettings {
     pub const NUM_FILTER_STEPS: usize = 4;
+
+    // // pub const SIZE: (u32, u32) = (640, 480);
+    // // pub const SIZE: (u32, u32) = (320, 240);
+    // pub const SIZE: (u32, u32) = (1280, 800);
 }
 
 impl Default for WebcamSettings {
@@ -265,16 +353,18 @@ impl Default for WebcamSettings {
             blur_sigma: 6.0,
             adaptive_threshold: false,
             // threshold_block_size: 3,
-            threshold_block_size: 35,
+            // threshold_block_size: 35,
+            threshold_block_size: 215,
             // adaptive_threshold_c: 1,
             threshold_type: 1,
-            use_hough: false,
+            use_hough: true,
             draw_circle: true,
             crosshair_size: 60.,
             pixels_per_mm: 200.,
             // mirror: (false, false),
             // rotate: 3,
             preprocess_pipeline: 0,
+            target_radius: 27.,
         }
     }
 }

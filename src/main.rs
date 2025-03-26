@@ -8,13 +8,14 @@
 // // #![windows_subsystem = "windows"]
 // #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+pub mod appconfig;
 pub mod klipper_protocol;
 pub mod logging;
 pub mod options;
+pub mod tests;
 pub mod ui;
 pub mod vision;
-pub mod webcam;
-pub mod appconfig;
+// pub mod webcam;
 
 use std::collections::HashMap;
 
@@ -38,7 +39,7 @@ fn main() -> opencv::Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "tests")]
+#[cfg(feature = "nope")]
 fn main() -> Result<()> {
     logging::init_logs();
 
@@ -127,6 +128,15 @@ fn main() -> Result<()> {
     for (i, path) in paths.enumerate() {
         // read to ImageBuffer
     }
+
+    Ok(())
+}
+
+#[cfg(feature = "tests")]
+fn main() -> Result<()> {
+    logging::init_logs();
+
+    tests::main_tests().unwrap();
 
     Ok(())
 }
