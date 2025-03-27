@@ -1,6 +1,7 @@
 pub mod auto_offset;
 pub mod data_labeling;
 pub mod klipper_ui;
+pub mod preprocess_ui;
 pub mod ui_types;
 pub mod webcam_controls;
 
@@ -31,6 +32,10 @@ impl App {
         *webcam_settings = out.webcam_settings;
         drop(webcam_settings);
 
+        if let Err(e) = crate::appconfig::read_options_from_file("config.toml", &mut out.options) {
+            error!("Failed to read options from file: {}", e);
+        }
+
         // out.list_sort = Some((0, history_tab::SortOrder::Descending));
 
         // let filter = nucleo::Nucleo::new(
@@ -58,10 +63,18 @@ impl App {
     fn controls(&mut self, ui: &mut egui::Ui) {
         if self.klipper.is_none() {
             ui.label("No Klipper connection");
+            ui.label(format!("Printer URL: {}", self.options.printer_url));
 
             if ui.button("Connect").clicked() || !self.tried_startup_connection {
                 self.tried_startup_connection = true;
-                let url = "http://192.168.0.245";
+
+                let Ok(url) = url::Url::parse(&self.options.printer_url) else {
+                    self.errors.push("Invalid URL".to_string());
+                    return;
+                };
+
+                debug!("Connecting to Klipper at {}", url.to_string());
+
                 let mut klipper = match crate::klipper_protocol::KlipperProtocol::new(url) {
                     Ok(klipper) => klipper,
                     Err(e) => {
@@ -568,10 +581,10 @@ impl App {
                     if let Some((_, tgt)) = self.data_labeling.target {
                         ui.label(
                             RichText::new(format!("Target: ({:.1}, {:.1})", tgt.x, tgt.y))
-                                .size(16.),
+                                .size(14.),
                         );
                     } else {
-                        ui.label(RichText::new("Target: ").size(16.));
+                        ui.label(RichText::new("Target: ").size(14.));
                     }
 
                     ui.end_row();
@@ -579,10 +592,10 @@ impl App {
                     if let Some((x, y, radius)) = self.current_located_nozzle {
                         ui.label(
                             RichText::new(format!("Located: ({:.1}, {:.1}), {:.0}", x, y, radius))
-                                .size(16.),
+                                .size(14.),
                         );
                     } else {
-                        ui.label(RichText::new("Located: ").size(16.));
+                        ui.label(RichText::new("Located: ").size(14.));
                     }
 
                     ui.end_row();
@@ -590,9 +603,11 @@ impl App {
                     ui.separator();
                     ui.end_row();
 
-                    ui.label("Scale: ");
-                    ui.radio_value(&mut self.options.camera_scale, 0.5, "x0.5");
-                    ui.radio_value(&mut self.options.camera_scale, 1.0, "x1.0");
+                    ui.horizontal(|ui| {
+                        ui.label("Scale: ");
+                        ui.radio_value(&mut self.options.camera_scale, 0.5, "x0.5");
+                        ui.radio_value(&mut self.options.camera_scale, 1.0, "x1.0");
+                    });
 
                     ui.end_row();
 

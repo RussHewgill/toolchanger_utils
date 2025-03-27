@@ -21,7 +21,7 @@ impl Default for Options {
             num_tools: 4,
             bounce_amount: 0.5,
             camera_size: (1280., 800.),
-            camera_scale: 1.0,
+            camera_scale: 0.5,
         }
     }
 }
@@ -36,9 +36,9 @@ impl App {
     fn _options(&mut self, ui: &mut egui::Ui) {
         egui::widgets::global_theme_preference_buttons(ui);
 
-        ui.horizontal(|ui| {
-            ui.label("Camera Index:");
-            ui.text_edit_singleline(&mut self.options.camera_index);
-        });
+        // ui.horizontal(|ui| {
+        //     ui.label("Camera Index:");
+        //     ui.text_edit_singleline(&mut self.options.camera_index);
+        // });
     }
 }

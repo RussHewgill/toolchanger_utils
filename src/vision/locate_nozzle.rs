@@ -331,7 +331,7 @@ pub fn locate_nozzle(
     opencv::imgcodecs::imwrite(&format!("test0.jpg"), &img, &opencv::core::Vector::new()).unwrap();
 
     let (mut img_out, mat0) = preprocess_0(&img, settings, 0, true)?;
-    let (_, mat1) = preprocess_0(&img, settings, 1, false)?;
+    // let (_, mat1) = preprocess_0(&img, settings, 1, false)?;
     // let mat1 = preprocess_1(&img, settings)?;
     // let mat2 = preprocess_2(&img, settings)?;
     drop(img);
@@ -360,35 +360,42 @@ pub fn locate_nozzle(
             color = opencv::core::Scalar::new(0., 255., 0., 0.);
         }
 
-        /// Combo 2: preprocess 1 (binary + triangle) + Standard
-        if detectors.keypoints.len() == 0 {
-            detectors.standard.detect(
-                &mat1,
-                &mut detectors.keypoints,
-                &opencv::core::no_array(),
-            )?;
-            if detectors.keypoints.len() > 0 {
-                color = opencv::core::Scalar::new(255., 255., 0., 0.); // yellow
+        #[cfg(feature = "nope")]
+        {
+            /// Combo 2: preprocess 1 (binary + triangle) + Standard
+            if detectors.keypoints.len() == 0 {
+                detectors.standard.detect(
+                    &mat1,
+                    &mut detectors.keypoints,
+                    &opencv::core::no_array(),
+                )?;
+                if detectors.keypoints.len() > 0 {
+                    color = opencv::core::Scalar::new(255., 255., 0., 0.); // yellow
+                }
             }
-        }
 
-        /// Combo 2: preprocess 0 (binary) + Relaxed
-        if detectors.keypoints.len() == 0 {
-            detectors
-                .relaxed
-                .detect(&mat0, &mut detectors.keypoints, &opencv::core::no_array())?;
-            if detectors.keypoints.len() > 0 {
-                color = opencv::core::Scalar::new(0., 0., 255., 0.);
+            /// Combo 2: preprocess 0 (binary) + Relaxed
+            if detectors.keypoints.len() == 0 {
+                detectors.relaxed.detect(
+                    &mat0,
+                    &mut detectors.keypoints,
+                    &opencv::core::no_array(),
+                )?;
+                if detectors.keypoints.len() > 0 {
+                    color = opencv::core::Scalar::new(0., 0., 255., 0.);
+                }
             }
-        }
 
-        /// Combo 3: preprocess 1 (binary + triangle) + Relaxed
-        if detectors.keypoints.len() == 0 {
-            detectors
-                .relaxed
-                .detect(&mat1, &mut detectors.keypoints, &opencv::core::no_array())?;
-            if detectors.keypoints.len() > 0 {
-                color = opencv::core::Scalar::new(255., 0., 0., 0.); // red
+            /// Combo 3: preprocess 1 (binary + triangle) + Relaxed
+            if detectors.keypoints.len() == 0 {
+                detectors.relaxed.detect(
+                    &mat1,
+                    &mut detectors.keypoints,
+                    &opencv::core::no_array(),
+                )?;
+                if detectors.keypoints.len() > 0 {
+                    color = opencv::core::Scalar::new(255., 0., 0., 0.); // red
+                }
             }
         }
 
@@ -548,6 +555,8 @@ pub fn preprocess_0(
         //     255.0,
         //     opencv::imgproc::THRESH_BINARY_INV,
         // )?;
+
+        let thresh_type = settings.threshold_type;
 
         let t = match thresh_type {
             0 => opencv::imgproc::THRESH_BINARY_INV,

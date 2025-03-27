@@ -34,9 +34,9 @@ impl BlobDetectors {
             // max_area: 15000.0,
             min_area: std::f32::consts::PI * 20.0f32.powi(2), // ~1250
             // min_area: std::f32::consts::PI * 38.0f32.powi(2), // ~4500
-            // max_area: std::f32::consts::PI * 100.0f32.powi(2), // 30_000
             // max_area: std::f32::consts::PI * 70.0f32.powi(2), // ~15400
-            max_area: std::f32::consts::PI * 50.0f32.powi(2), // ~7800
+            // max_area: std::f32::consts::PI * 50.0f32.powi(2), // ~7800
+            max_area: std::f32::consts::PI * 100.0f32.powi(2), // 30_000
 
             /// Filter by circularity
             filter_by_circularity: true,
@@ -146,6 +146,24 @@ impl BlobDetectors {
             min_dist_between_blobs: 2.,
             collect_contours: false,
         }
+    }
+
+    /// XXX: uses same params for all solvers
+    pub fn new_with_params(params: SimpleBlobDetector_Params) -> Result<Self> {
+        let standard = SimpleBlobDetector::create(params.clone())?;
+        let relaxed = SimpleBlobDetector::create(params.clone())?;
+        let super_relaxed = SimpleBlobDetector::create(params.clone())?;
+
+        Ok(Self {
+            params_standard: params.clone(),
+            params_relaxed: params.clone(),
+            params_super_relaxed: params,
+
+            standard,
+            relaxed,
+            super_relaxed,
+            keypoints: Vector::<opencv::core::KeyPoint>::new(),
+        })
     }
 
     pub fn new() -> Result<Self> {

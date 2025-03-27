@@ -1,5 +1,7 @@
 use std::sync::{Arc, Mutex};
 
+use crate::vision::preprocess::{PreprocessStep, PreprocessStepType};
+
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 pub struct App {
     #[serde(skip)]
@@ -64,6 +66,10 @@ pub struct App {
 
     #[serde(skip)]
     pub camera_settings: crate::vision::CameraSettings,
+
+    pub preprocess_add: PreprocessStepType,
+
+    pub preprocess_pipeline: Vec<PreprocessStep>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, PartialOrd)]

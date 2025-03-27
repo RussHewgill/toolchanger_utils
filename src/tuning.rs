@@ -1,13 +1,18 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, bail, ensure, Context, Result};
+use opencv::features2d::SimpleBlobDetector_Params;
 use tracing::{debug, error, info, trace, warn};
 
 use argmin::{
     core::{CostFunction, Error, Executor, Gradient, Hessian, Operator},
-    solver::simulatedannealing::{Anneal, SimulatedAnnealing},
+    solver::{
+        neldermead::NelderMead,
+        simulatedannealing::{Anneal, SimulatedAnnealing},
+    },
 };
 use argmin_observer_slog::SlogLogger;
+use ndarray::{array, Array1};
 use rand::prelude::*;
 use rand_xoshiro::{rand_core::SeedableRng, Xoshiro256PlusPlus};
 
@@ -25,22 +30,39 @@ pub struct OptimizeData {
 
     pub detectors: BlobDetectors,
 
-    pub params: VisionSettings,
+    pub params: SimpleBlobDetector_Params,
+
+    pub vision_params: VisionSettings,
 
     rng: Arc<Mutex<Xoshiro256PlusPlus>>,
 }
 
 impl OptimizeData {
+    #[cfg(feature = "nope")]
     pub const PARAM_RANGES: [(i32, i32); 3] = [
         //  (1, 254)
         (3, 15),
         (-100, 100),
         (1, 254),
     ];
+
+    pub const PARAM_RANGES: [(f64, f64); 4] = [
+        /// min_area
+        (1000., 15_000.),
+        // /// max_area
+        // (5000., 20_000.),
+        /// min_circularity
+        (0.2, 0.8),
+        /// min_convexity
+        (0.2, 0.8),
+        /// min_inertia_ratio
+        (0.2, 0.8),
+    ];
 }
 
 impl CostFunction for OptimizeData {
-    type Param = Vec<i32>;
+    // type Param = Vec<i32>;
+    type Param = Vec<f64>;
 
     type Output = f64;
 
@@ -51,8 +73,10 @@ impl CostFunction for OptimizeData {
     }
 }
 
+#[cfg(feature = "nope")]
 impl Operator for OptimizeData {
-    type Param = Vec<i32>;
+    // type Param = Vec<i32>;
+    type Param = Array1<f64>;
     type Output = f64;
 
     fn apply(&self, param: &Self::Param) -> std::result::Result<Self::Output, Error> {
@@ -62,11 +86,23 @@ impl Operator for OptimizeData {
     }
 }
 
+#[cfg(feature = "nope")]
 impl Anneal for OptimizeData {
-    type Param = Vec<i32>;
-    type Output = Vec<i32>;
+    // type Param = Vec<i32>;
+    // type Output = Vec<i32>;
+    type Param = Array1<f64>;
+    type Output = Array1<f64>;
     type Float = f64;
 
+    fn anneal(
+        &self,
+        param: &Self::Param,
+        extent: Self::Float,
+    ) -> std::result::Result<Self::Output, Error> {
+        unimplemented!()
+    }
+
+    #[cfg(feature = "nope")]
     fn anneal(
         &self,
         param: &Self::Param,
@@ -96,6 +132,7 @@ impl Anneal for OptimizeData {
     }
 }
 
+/// Load
 impl OptimizeData {
     pub fn load() -> Result<Self> {
         let mut saved_targets = {
@@ -115,14 +152,168 @@ impl OptimizeData {
             images.push((path.to_string_lossy().to_string(), (target.clone(), image)));
         }
 
+        let detectors = BlobDetectors::new()?;
+
         Ok(Self {
             images,
-            detectors: BlobDetectors::new()?,
-            params: VisionSettings::default(),
+            params: detectors.params_standard.clone(),
+            detectors,
+            vision_params: VisionSettings::default(),
             rng: Arc::new(Mutex::new(Xoshiro256PlusPlus::seed_from_u64(1234))),
         })
     }
+}
 
+/// Blob Detector
+impl OptimizeData {
+    pub fn apply_params(blob_params: &mut SimpleBlobDetector_Params, params: &Vec<f64>) {
+        debug!("Applying params: {:?}", params);
+        blob_params.min_area = params[0] as f32;
+        // blob_params.min_circularity = params[1] as f32;
+        // blob_params.min_convexity = params[2] as f32;
+        // blob_params.min_inertia_ratio = params[3] as f32;
+    }
+
+    pub fn evaluate(&self, settings: &SimpleBlobDetector_Params) -> Result<f64> {
+        // let mut detectors = self.detectors.make_clone().unwrap();
+        let mut detectors = BlobDetectors::new_with_params(settings.clone())?;
+
+        let mut errors: Vec<(f64, f64)> = vec![];
+        let mut misses: Vec<String> = vec![];
+
+        // debug!("blur_kernel_size: {}", settings.blur_kernel_size);
+        // debug!("blur_sigma: {}", settings.blur_sigma);
+        // debug!("threshold_block_size: {}", settings.threshold_block_size);
+
+        // debug!("Skipping all but first");
+
+        for (_, (target, img)) in self.images.iter() {
+            let (mat, result) = match crate::vision::locate_nozzle::locate_nozzle(
+                &img,
+                &self.vision_params,
+                &mut detectors,
+            ) {
+                Err(e) => {
+                    // error!("Failed to locate nozzle in image {}: {}", path, e);
+                    error!("Failed to locate nozzle: {}", e);
+                    continue;
+                }
+                Ok(result) => result,
+            };
+
+            if let Some((x, y, radius)) = result {
+                let error_x = target.0 - x;
+                let error_y = target.1 - y;
+
+                let error_x = target.0 - x;
+                let error_y = target.1 - y;
+
+                errors.push((error_x, error_y));
+            }
+        }
+
+        let mut total_error = (0.0, 0.0);
+        let mut error_sq = (0., 0.);
+
+        let mut total_dist_err = 0.0;
+
+        for (error_x, error_y) in errors.iter() {
+            total_error.0 += error_x.abs();
+            total_error.1 += error_y.abs();
+
+            error_sq.0 += error_x.powi(2);
+            error_sq.1 += error_y.powi(2);
+
+            total_dist_err += (error_x.powi(2) + error_y.powi(2)).sqrt();
+        }
+
+        let avg_error = (
+            total_error.0 / errors.len() as f64,
+            total_error.1 / errors.len() as f64,
+        );
+
+        debug!("Average Error: {:.1}, {:.1}", avg_error.0, avg_error.1);
+
+        let mut average_dist_err = total_dist_err / errors.len() as f64;
+
+        for _ in misses.iter() {
+            average_dist_err += 1000.0;
+        }
+
+        // Ok((avg_error.0 + avg_error.1) / 2.)
+        // Ok(error_sq.0 + error_sq.1)
+        Ok(average_dist_err)
+    }
+
+    #[cfg(feature = "nope")]
+    pub fn optimize() -> Result<()> {
+        debug!("Optimizing...");
+
+        let data = OptimizeData::load().unwrap();
+
+        let mut params = vec![1000.];
+
+        let e = data.cost(&params)?;
+        debug!("Cost: {}", e);
+
+        let mut params = vec![8000.];
+
+        let e = data.cost(&params)?;
+        debug!("Cost: {}", e);
+
+        Ok(())
+    }
+
+    // #[cfg(feature = "nope")]
+    pub fn optimize() -> Result<()> {
+        debug!("Optimizing...");
+
+        let data = OptimizeData::load().unwrap();
+
+        let init_guess: Vec<f64> = OptimizeData::PARAM_RANGES
+            .iter()
+            .map(|(min, max)| (*min as f64 + *max as f64) / 2.)
+            .collect();
+
+        let mut simplex = vec![init_guess.clone()];
+
+        for i in 0..init_guess.len() {
+            let mut perturbed_point = init_guess.clone();
+
+            let k = OptimizeData::PARAM_RANGES[i];
+            let k = (k.0 + k.1) / 10.;
+
+            perturbed_point[i] += k; // Perturb the i-th parameter by 1/10th of the range
+
+            simplex.push(perturbed_point);
+        }
+
+        let nelder_mead = NelderMead::new(simplex);
+
+        let executor = Executor::new(data, nelder_mead)
+            .configure(|state| {
+                state
+                    .param(init_guess.clone())
+                    .max_iters(100)
+                    .target_cost(0.0)
+            })
+            .add_observer(
+                SlogLogger::term(),
+                argmin::core::observers::ObserverMode::Always,
+            );
+
+        debug!("Starting optimization...");
+        executor.run().unwrap();
+
+        debug!("Done");
+
+        Ok(())
+    }
+}
+
+/// Preprocess
+#[cfg(feature = "nope")]
+impl OptimizeData {
     pub fn apply_params(vision_params: &mut VisionSettings, params: &Vec<i32>) {
         vision_params.blur_kernel_size = params[0] as u32;
         vision_params.blur_sigma = params[1] as f64 / 10.;

@@ -5,6 +5,14 @@ use crate::vision::{CameraControl, VisionSettings, WebcamCommand};
 use super::ui_types::App;
 
 impl App {
+    #[cfg(feature = "nope")]
+    pub fn webcam_controls(&mut self, ui: &mut egui::Ui) {
+        self.preprocess_ui(ui);
+
+        //
+    }
+
+    // #[cfg(feature = "nope")]
     pub fn webcam_controls(&mut self, ui: &mut egui::Ui) {
         ui.label("Filter Step");
         let resp = ui.add(
@@ -108,7 +116,9 @@ impl App {
         ui.label("Threshold Type");
         let resp =
             ui.add(egui::Slider::new(&mut self.webcam_settings.threshold_type, 0..=2).integer());
-
+        // ui.radio_value(&mut self.webcam_settings.threshold_type, 0, "Binary");
+        // ui.radio_value(&mut self.webcam_settings.threshold_type, 1, "Triangle");
+        // ui.radio_value(&mut self.webcam_settings.threshold_type, 2, "Otsu");
         if resp.hovered() {
             let delta = ui.input(|i| {
                 i.events.iter().find_map(|e| match e {
@@ -212,8 +222,8 @@ impl App {
         ui.separator();
         ui.end_row();
 
-        self.webcam_camera_controls(ui);
-        ui.end_row();
+        // self.webcam_camera_controls(ui);
+        // ui.end_row();
 
         if self.webcam_settings != self.webcam_settings_prev {
             let mut settings = self.webcam_settings_mutex.lock().unwrap();

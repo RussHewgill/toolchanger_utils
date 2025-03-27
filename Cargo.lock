@@ -246,7 +246,7 @@ checksum = "d93a0d0269b60bd1cd674de70314e3f0da97406cf8c1936ce760d2a46e0f13fe"
 dependencies = [
  "anyhow",
  "cfg-if 1.0.0",
- "ndarray",
+ "ndarray 0.15.6",
  "ndarray-linalg",
  "num-complex",
  "num-integer",
@@ -2545,6 +2545,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ndarray"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "882ed72dce9365842bf196bdeedf5055305f11fc8c03dee7bb0194a6cad34841"
+dependencies = [
+ "matrixmultiply",
+ "num-complex",
+ "num-integer",
+ "num-traits",
+ "portable-atomic",
+ "portable-atomic-util",
+ "rawpointer",
+]
+
+[[package]]
 name = "ndarray-linalg"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2553,7 +2568,7 @@ dependencies = [
  "cauchy",
  "katexit",
  "lax",
- "ndarray",
+ "ndarray 0.15.6",
  "num-complex",
  "num-traits",
  "rand 0.8.5",
@@ -3269,6 +3284,21 @@ dependencies = [
  "rustix 0.38.44",
  "tracing",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "portable-atomic"
+version = "1.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "350e9b48cbc6b0e028b0473b114454c6316e57336ee184ceab6e53f72c178b3e"
+
+[[package]]
+name = "portable-atomic-util"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8a2f0d8d040d7848a709caf78912debcc3f33ee4b3cac47d73d1e1069e83507"
+dependencies = [
+ "portable-atomic",
 ]
 
 [[package]]
@@ -4390,6 +4420,7 @@ dependencies = [
  "egui",
  "egui_extras",
  "image",
+ "ndarray 0.16.1",
  "nokhwa",
  "opencv",
  "rand 0.9.0",
@@ -4403,6 +4434,7 @@ dependencies = [
  "tracing-appender",
  "tracing-log",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]

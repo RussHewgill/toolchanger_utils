@@ -13,3 +13,4 @@ preview*.png
 *.jpg
 test_images/*
 *.dll
+config.toml

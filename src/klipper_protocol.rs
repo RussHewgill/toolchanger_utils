@@ -4,12 +4,14 @@ use anyhow::{anyhow, bail, ensure, Context, Result};
 use tracing::{debug, error, info, trace, warn};
 
 use serde_json::Value;
+use url::Url;
 
 use crate::ui::ui_types::Axis;
 
 #[derive(Clone)]
 pub struct KlipperProtocol {
-    pub url: String,
+    // pub url: String,
+    url: Url,
     client: reqwest::blocking::Client,
     id: std::sync::Arc<AtomicU32>,
 
@@ -21,7 +23,10 @@ pub struct KlipperProtocol {
 }
 
 impl KlipperProtocol {
-    pub fn new(url: &str) -> Result<Self> {
+    pub fn new(
+        // url: &str,
+        url: url::Url,
+    ) -> Result<Self> {
         let client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(10))
             .danger_accept_invalid_certs(true)
@@ -29,7 +34,8 @@ impl KlipperProtocol {
             .context("Failed to build HTTP client")?;
 
         Ok(KlipperProtocol {
-            url: url.to_string(),
+            // url: url.to_string(),
+            url,
             client,
             id: std::sync::Arc::new(AtomicU32::new(1)),
 
@@ -61,7 +67,8 @@ impl KlipperProtocol {
             }
         });
 
-        let url = format!("{}/printer/objects/query", self.url);
+        // let url = format!("{}/printer/objects/query", self.url);
+        let url = self.url.join("/printer/objects/query")?;
 
         // debug!("Sending request to {}", url);
 
@@ -226,7 +233,8 @@ impl KlipperProtocol {
     }
 
     fn get_variables(&self) -> Result<Value> {
-        let url = format!("{}/printer/objects/query", self.url);
+        // let url = format!("{}/printer/objects/query", self.url);
+        let url = self.url.join("/printer/objects/query")?;
 
         let map = serde_json::json!({
             "objects": {
@@ -252,7 +260,8 @@ impl KlipperProtocol {
         let mut map = HashMap::new();
         map.insert("script", gcode);
 
-        let url = format!("{}/printer/gcode/script", self.url);
+        // let url = format!("{}/printer/gcode/script", self.url);
+        let url = self.url.join("/printer/gcode/script")?;
 
         let res = self
             .client

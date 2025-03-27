@@ -144,7 +144,6 @@ fn main() -> Result<()> {
 }
 
 /// Main App
-// #[cfg(feature = "nope")]
 #[cfg(not(feature = "tests"))]
 fn main() -> eframe::Result<()> {
     use ui::ui_types::App;
