@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use nokhwa::utils::{ControlValueSetter, KnownCameraControl};
 
 // pub use self::running_average::*;
-pub use self::circle_aggregator::*;
+// pub use self::circle_aggregator::*;
 
 #[derive(Debug, PartialEq)]
 pub enum NozzlePosition {
@@ -110,7 +110,7 @@ impl CameraControl {
     }
 }
 
-// #[cfg(feature = "nope")]
+#[cfg(feature = "nope")]
 pub mod circle_aggregator {
     use std::collections::VecDeque;
 

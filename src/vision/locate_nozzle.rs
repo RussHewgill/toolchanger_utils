@@ -534,6 +534,7 @@ pub fn preprocess_0(
         img_out = img.clone();
     }
 
+    // #[cfg(feature = "nope")]
     // Threshold to isolate dark regions (nozzle)
     if settings.adaptive_threshold {
         opencv::imgproc::adaptive_threshold(

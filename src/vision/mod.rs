@@ -1,6 +1,7 @@
 pub mod blob_detection;
 pub mod locate_nozzle;
 pub mod preprocess;
+pub mod running_average;
 pub mod utilities;
 pub mod vision_types;
 

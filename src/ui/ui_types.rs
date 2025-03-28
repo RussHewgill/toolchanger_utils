@@ -47,7 +47,8 @@ pub struct App {
 
     #[serde(skip)]
     // pub running_average: crate::vision::RunningAverage,
-    pub running_average: crate::vision::vision_types::CircleAggregator,
+    // pub running_average: crate::vision::vision_types::CircleAggregator,
+    pub running_average: crate::vision::running_average::CircleAggregator,
 
     #[serde(skip)]
     pub channel_to_ui: Option<crossbeam_channel::Receiver<crate::vision::WebcamMessage>>,
@@ -56,14 +57,14 @@ pub struct App {
     pub channel_to_vision: Option<crossbeam_channel::Sender<crate::vision::WebcamCommand>>,
 
     #[serde(skip)]
-    pub auto_offset: Option<crate::ui::auto_offset::AutoOffset>,
+    // pub auto_offset: Option<crate::ui::auto_offset::AutoOffset>,
+    pub auto_offset: crate::ui::auto_offset::AutoOffset,
 
     #[serde(skip)]
     pub data_labeling: crate::ui::data_labeling::DataLabeling,
 
-    #[serde(skip)]
-    pub current_located_nozzle: Option<(f64, f64, f64)>,
-
+    // #[serde(skip)]
+    // pub current_located_nozzle: Option<(f64, f64, f64)>,
     #[serde(skip)]
     pub camera_settings: crate::vision::CameraSettings,
 

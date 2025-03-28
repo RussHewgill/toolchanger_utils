@@ -14,3 +14,5 @@ preview*.png
 test_images/*
 *.dll
 config.toml
+auto_offset2.rs
+saved_data.toml

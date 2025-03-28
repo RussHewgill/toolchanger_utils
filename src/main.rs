@@ -41,94 +41,28 @@ fn main() -> opencv::Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "nope")]
+// #[cfg(feature = "nope")]
 fn main() -> Result<()> {
     logging::init_logs();
 
-    /// get all files in test_images/
-    let mut paths = std::fs::read_dir("test_images").unwrap().enumerate();
+    let mut avg = vision::running_average::CircleAggregator::default();
 
-    // 10 images per center
-    let centers = [
-        (944., 450.), // 0-9
-        (947., 545.), // 10-19
-        (370., 181.), // 20-29
-        (635., 400.), // 30-39
-    ];
+    let p = (50., 50., 10.);
 
-    let mut detectors = vision::blob_detection::BlobDetectors::new().unwrap();
-
-    let settings = {
-        let mut settings = vision::VisionSettings::default();
-
-        settings.adaptive_threshold = false;
-        settings.threshold_block_size = 3;
-
-        settings.blur_kernel_size = 7;
-        settings.blur_sigma = 6.0;
-
-        settings
-    };
-
-    let mut errors: Vec<Vec<(f64, f64)>> = vec![];
-
-    for n in 0..centers.len() {
-        let mut errors_i = vec![];
-
-        for i in 0..10 {
-            let path = paths.next().unwrap().1.unwrap().path();
-            let mut img = image::ImageReader::open(path)?
-                .decode()?
-                .as_rgb8()
-                .unwrap()
-                .clone();
-
-            let (_, pos) =
-                vision::locate_nozzle::locate_nozzle(&mut img, &settings, &mut detectors)?;
-
-            if let Some(pos) = pos {
-                let error_x = (centers[n].0 - pos.0).abs();
-                let error_y = (centers[n].1 - pos.1).abs();
-
-                // debug!("Path {}: ({:.1}, {:.1})", i, pos.0, pos.1);
-                // debug!("Error: ({:.1}, {:.1})", error_x, error_y);
-
-                errors_i.push((error_x, error_y));
-            } else {
-                // debug!("No position found");
-            }
-        }
-
-        errors.push(errors_i);
+    for _ in 0..30 {
+        avg.add_frame(Some(p));
+    }
+    for _ in 0..10 {
+        avg.add_frame(None);
     }
 
-    for (i, c) in centers.iter().enumerate() {
-        eprintln!("Center: ({:.1}, {:.1})", c.0, c.1);
-
-        let mut error_x = 0.;
-        let mut error_y = 0.;
-
-        let errors = &errors[i];
-
-        if errors.len() == 0 {
-            eprintln!("    No positions found");
-            continue;
-        }
-
-        for e in errors {
-            error_x += e.0;
-            error_y += e.1;
-        }
-
-        error_x /= errors.len() as f64;
-        error_y /= errors.len() as f64;
-
-        eprintln!("    Average error: ({:.1}, {:.1})", error_x, error_y);
-    }
-
-    #[cfg(feature = "nope")]
-    for (i, path) in paths.enumerate() {
-        // read to ImageBuffer
+    if let Some((confidence, (c_x, c_y, c_r))) = avg.confidence() {
+        eprintln!(
+            "Confidence: {:.3}, ({:.4}, {:.4}, r = {:.1})",
+            confidence, c_x, c_y, c_r
+        );
+    } else {
+        eprintln!("No confidence");
     }
 
     Ok(())
@@ -144,6 +78,7 @@ fn main() -> Result<()> {
 }
 
 /// Main App
+#[cfg(feature = "nope")]
 #[cfg(not(feature = "tests"))]
 fn main() -> eframe::Result<()> {
     use ui::ui_types::App;

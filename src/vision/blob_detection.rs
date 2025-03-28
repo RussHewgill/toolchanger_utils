@@ -19,6 +19,103 @@ pub struct BlobDetectors {
 }
 
 impl BlobDetectors {
+    /// Optimized, pass 2
+    /// [51.994232, 53.994232, 1000.0, 50000.0, 0.758737, 0.8, 0.2]
+    fn blob_params_standard() -> SimpleBlobDetector_Params {
+        SimpleBlobDetector_Params {
+            /// Thresholds
+            min_threshold: 50.0,
+            max_threshold: 100.0,
+            threshold_step: 1.0,
+
+            /// Filter by area
+            filter_by_area: true,
+            min_area: 1000.,
+            max_area: 50_000.,
+
+            /// Filter by circularity
+            filter_by_circularity: true,
+            // filter_by_circularity: false,
+            min_circularity: 0.75,
+            max_circularity: 1.0,
+
+            /// Filter by convexity
+            filter_by_convexity: true,
+            // filter_by_convexity: false,
+            min_convexity: 0.8,
+            max_convexity: 1.0,
+
+            /// Filter by inertia
+            filter_by_inertia: true,
+            // filter_by_inertia: false,
+            min_inertia_ratio: 0.2,
+            max_inertia_ratio: 340282350000000000000000000000000000000.,
+
+            /// Filter by color
+            filter_by_color: true,
+            // filter_by_color: false,
+            blob_color: 255, // white
+            // blob_color: 0, // black
+            min_repeatability: 2,
+            min_dist_between_blobs: 10.,
+            collect_contours: false,
+        }
+    }
+
+    #[cfg(feature = "nope")]
+    /// Optimized, pass 1
+    fn blob_params_standard() -> SimpleBlobDetector_Params {
+        SimpleBlobDetector_Params {
+            /// Thresholds
+            min_threshold: 1.0,
+            max_threshold: 250.0,
+            threshold_step: 1.0,
+
+            /// Filter by area
+            filter_by_area: true,
+            // filter_by_area: false,
+            // min_area: 400.0,
+            // max_area: 900.0,
+            // max_area: 15000.0,
+            min_area: 2205.,
+            max_area: std::f32::consts::PI * 60.0f32.powi(2),
+
+            /// Filter by circularity
+            filter_by_circularity: true,
+            // filter_by_circularity: false,
+            // min_circularity: 0.8,
+            min_circularity: 0.4,
+            max_circularity: 1.0,
+
+            /// Filter by convexity
+            filter_by_convexity: true,
+            // filter_by_convexity: false,
+            min_convexity: 0.3,
+            // min_convexity: 0.5,
+            max_convexity: 1.0,
+
+            /// Filter by inertia
+            filter_by_inertia: true,
+            // filter_by_inertia: false,
+            // min_inertia_ratio: 0.3, // kTAMV
+            // min_inertia_ratio: 0.8,
+            min_inertia_ratio: 0.5,
+            // max_inertia_ratio: f32::INFINITY,
+            max_inertia_ratio: 340282350000000000000000000000000000000.,
+
+            /// Filter by color
+            filter_by_color: true,
+            // filter_by_color: false,
+            blob_color: 255, // white
+            // blob_color: 0, // black
+            min_repeatability: 2,
+            min_dist_between_blobs: 10.,
+            collect_contours: false,
+        }
+    }
+
+    /// Hand-tuned
+    #[cfg(feature = "nope")]
     fn blob_params_standard() -> SimpleBlobDetector_Params {
         SimpleBlobDetector_Params {
             /// Thresholds

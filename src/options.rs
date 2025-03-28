@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use tracing::{debug, error, info, trace, warn};
 
-use crate::ui::ui_types::App;
+use crate::ui::{auto_offset::AutoOffsetSettings, ui_types::App};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Options {
@@ -11,6 +11,8 @@ pub struct Options {
     pub bounce_amount: f64,
     pub camera_size: (f64, f64),
     pub camera_scale: f64,
+
+    pub auto_offset_settings: AutoOffsetSettings,
 }
 
 impl Default for Options {
@@ -22,6 +24,7 @@ impl Default for Options {
             bounce_amount: 0.5,
             camera_size: (1280., 800.),
             camera_scale: 0.5,
+            auto_offset_settings: AutoOffsetSettings::default(),
         }
     }
 }

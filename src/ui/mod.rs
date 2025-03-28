@@ -10,7 +10,7 @@ use ui_types::*;
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use tracing::{debug, error, info, trace, warn};
 
-use egui::{Button, Color32, RichText, Vec2};
+use egui::{Button, Color32, Label, RichText, Vec2};
 use egui_extras::StripBuilder;
 
 use crate::vision::VisionSettings;
@@ -34,6 +34,10 @@ impl App {
 
         if let Err(e) = crate::appconfig::read_options_from_file("config.toml", &mut out.options) {
             error!("Failed to read options from file: {}", e);
+        }
+
+        if let Ok(data) = crate::saved_data::SavedData::load_from_file("saved_data.toml") {
+            out.camera_pos = Some(data.camera_position);
         }
 
         // out.list_sort = Some((0, history_tab::SortOrder::Descending));
@@ -106,6 +110,67 @@ impl App {
         /// Auto Offset
         ui.horizontal(|ui| {
             let button = egui::Button::new(RichText::new("Locate Single Nozzle").size(16.));
+            let button = if matches!(
+                self.auto_offset.auto_offset_type(),
+                auto_offset::AutoOffsetType::SingleTool
+            ) {
+                button.fill(Color32::from_rgb(50, 158, 244))
+            } else {
+                button
+            };
+            if ui.add(button).clicked() {
+                if let Some((x, y, _)) = self.get_position() {
+                    if let Some(tool) = self.active_tool {
+                        self.auto_offset.start_single((x, y), tool as i32);
+                    }
+                }
+            }
+
+            let button = egui::Button::new(RichText::new("Locate All Nozzles").size(16.));
+            let button = if matches!(
+                self.auto_offset.auto_offset_type(),
+                auto_offset::AutoOffsetType::AllTools
+            ) {
+                button.fill(Color32::from_rgb(50, 158, 244))
+            } else {
+                button
+            };
+            if ui.add(button).clicked() {
+                if let Some((x, y, _)) = self.get_position() {
+                    if let Some(tool) = self.active_tool {
+                        if let Some((x, y, _)) = self.get_position() {
+                            self.auto_offset.start_all_tools((x, y));
+                        }
+                    }
+                }
+            }
+
+            let button = egui::Button::new(RichText::new("Repeatability Test").size(16.));
+            let button = if matches!(
+                self.auto_offset.auto_offset_type(),
+                crate::ui::auto_offset::AutoOffsetType::RepeatabilityTest
+            ) {
+                button.fill(Color32::from_rgb(50, 158, 244))
+            } else {
+                button
+            };
+            if ui.add(button).clicked() {
+                if let Some((x, y, _)) = self.get_position() {
+                    if let Some(t) = self.active_tool {
+                        debug!("Starting repeatability test");
+                        if let Some((x, y, _)) = self.get_position() {
+                            self.auto_offset.start_repeatability((x, y), t as i32);
+                        }
+                    }
+                }
+            }
+            //
+        });
+
+        /// Auto Offset
+        #[cfg(feature = "nope")]
+        ui.horizontal(|ui| {
+            let button = egui::Button::new(RichText::new("Locate Single Nozzle").size(16.));
             let button = if self
                 .auto_offset
                 .as_ref()
@@ -150,31 +215,28 @@ impl App {
             }
 
             let button = egui::Button::new(RichText::new("Repeatability Test").size(16.));
-            let button = if self
-                .auto_offset
-                .as_ref()
-                .map(|a| a.check_repeatability().is_some())
-                .unwrap_or(false)
-            {
+            let button = if matches!(
+                self.auto_offset.auto_offset_type(),
+                crate::ui::auto_offset::AutoOffsetType::RepeatabilityTest
+            ) {
                 button.fill(Color32::from_rgb(50, 158, 244))
             } else {
                 button
             };
             if ui.add(button).clicked() {
-                if self.auto_offset.is_none() {
-                    if let Some((x, y, _)) = self.get_position() {
-                        if let Some(t) = self.active_tool {
-                            debug!("Starting repeatability test");
-                            self.auto_offset =
-                                Some(crate::ui::auto_offset::AutoOffset::new_check_repeatability(
-                                    (x, y),
-                                    t as i32,
-                                    3,
-                                ));
-                        }
+                if let Some((x, y, _)) = self.get_position() {
+                    if let Some(t) = self.active_tool {
+                        debug!("Starting repeatability test");
+
+                        self.auto_offset.start_repeatability();
+
+                        // self.auto_offset =
+                        //     Some(crate::ui::auto_offset::AutoOffset::new_check_repeatability(
+                        //         (x, y),
+                        //         t as i32,
+                        //         3,
+                        //     ));
                     }
-                } else {
-                    self.auto_offset = None;
                 }
             }
         });
@@ -249,6 +311,18 @@ impl App {
                     if let Some((x, y, _)) = self.fetch_position() {
                         self.camera_pos = Some((x, y));
                         debug!("Camera position saved: ({:?}, {:?})", x, y);
+
+                        let mut saved_data =
+                            crate::saved_data::SavedData::load_from_file("saved_data.toml")
+                                .unwrap_or_default();
+
+                        saved_data.camera_position = (x, y);
+
+                        saved_data
+                            .save_to_file("saved_data.toml")
+                            .unwrap_or_else(|e| {
+                                error!("Failed to save camera position: {}", e);
+                            });
                     } else {
                         self.errors.push("Failed to get position".to_string());
                         self.camera_pos = None;
@@ -553,10 +627,26 @@ impl App {
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 egui::Grid::new("Filter Controls").show(ui, |ui| {
-                    if ui.button("Clear Running Average").clicked() {
-                        self.running_average.clear();
-                    }
-                    ui.end_row();
+                    // if ui.button("Clear Running Average").clicked() {
+                    //     self.running_average.clear();
+                    // }
+                    // ui.end_row();
+
+                    // if let Some((confidence, (c_x, c_y, c_r))) = self.running_average.confidence() {
+                    //     //
+                    // }
+
+                    // if let Some((x, y, r)) = self.running_average.current_guess() {
+                    //     ui.label(
+                    //         RichText::new(format!(
+                    //             "Current Guess: ({:.4}, {:.4}, r = {:.1})",
+                    //             x, y, r
+                    //         ))
+                    //         .monospace(),
+                    //     );
+                    // } else {
+                    //     ui.label(RichText::new("Current Guess: None").monospace());
+                    // }
 
                     // let (confidence, result) = self.running_average.get_result();
                     // // let confidence = self.running_average.calculate_confidence();
@@ -568,40 +658,38 @@ impl App {
                     //     ui.label("Result: None");
                     // }
 
-                    if let Some((_, moe)) = self.running_average.calculate_margin_of_error() {
-                        ui.label(format!("Margin of Error: ({:.3}, {:.3})", moe.0, moe.1));
-                    } else {
-                        ui.label("Margin of Error: None");
-                    }
+                    // if let Some((_, moe)) = self.running_average.calculate_margin_of_error() {
+                    //     ui.label(format!("Margin of Error: ({:.3}, {:.3})", moe.0, moe.1));
+                    // } else {
+                    //     ui.label("Margin of Error: None");
+                    // }
+                    // ui.end_row();
 
-                    ui.end_row();
-                    ui.separator();
-                    ui.end_row();
+                    // ui.separator();
+                    // ui.end_row();
 
-                    if let Some((_, tgt)) = self.data_labeling.target {
-                        ui.label(
-                            RichText::new(format!("Target: ({:.1}, {:.1})", tgt.x, tgt.y))
-                                .size(14.),
-                        );
-                    } else {
-                        ui.label(RichText::new("Target: ").size(14.));
-                    }
+                    // if let Some((_, tgt)) = self.data_labeling.target {
+                    //     ui.label(
+                    //         RichText::new(format!("Target: ({:.1}, {:.1})", tgt.x, tgt.y)), // .size(14.),
+                    //     );
+                    // } else {
+                    //     ui.label(RichText::new("Target: ").size(14.));
+                    // }
+                    // ui.end_row();
 
-                    ui.end_row();
+                    // if let Some((x, y, radius)) = self.current_located_nozzle {
+                    //     ui.label(
+                    //         RichText::new(format!("Located: ({:.1}, {:.1}), {:.0}", x, y, radius))
+                    //             .size(14.),
+                    //     );
+                    // } else {
+                    //     ui.label(RichText::new("Located: ").size(14.));
+                    // }
 
-                    if let Some((x, y, radius)) = self.current_located_nozzle {
-                        ui.label(
-                            RichText::new(format!("Located: ({:.1}, {:.1}), {:.0}", x, y, radius))
-                                .size(14.),
-                        );
-                    } else {
-                        ui.label(RichText::new("Located: ").size(14.));
-                    }
+                    // ui.end_row();
 
-                    ui.end_row();
-
-                    ui.separator();
-                    ui.end_row();
+                    // ui.separator();
+                    // ui.end_row();
 
                     ui.horizontal(|ui| {
                         ui.label("Scale: ");
@@ -798,12 +886,12 @@ impl eframe::App for App {
                         // debug!("Found nozzle: {:?}", pos);
                         // self.running_average.push_position((pos.0, pos.1));
                         self.running_average.add_frame(Some(pos));
-                        self.current_located_nozzle = Some(pos);
+                        // self.current_located_nozzle = Some(pos);
                     }
                     crate::vision::WebcamMessage::NozzleNotFound => {
                         // debug!("Nozzle not found");
                         self.running_average.add_frame(None);
-                        self.current_located_nozzle = None;
+                        // self.current_located_nozzle = None;
                     }
                 }
             }
@@ -857,13 +945,15 @@ impl eframe::App for App {
 
                 egui::TopBottomPanel::bottom("bottom")
                     .resizable(false)
-                    .default_height(200.)
+                    .default_height(600.)
                     .show(ctx, |ui| {
-                        if let Some(auto_offset) = self.auto_offset.take() {
-                            self.auto_offset = self.auto_offset(ui, auto_offset);
-                        } else {
-                            // self.offset_adjust(ui);
-                        }
+                        // if let Some(auto_offset) = self.auto_offset.take() {
+                        //     self.auto_offset = self.auto_offset(ui, auto_offset);
+                        // } else {
+                        //     // self.offset_adjust(ui);
+                        // }
+
+                        self.auto_offset(ui);
                     });
 
                 egui::CentralPanel::default().show(ctx, |ui| {

@@ -25,7 +25,7 @@ use crate::{
 pub struct OptimizeData {
     pub images: Vec<(
         String,
-        ((f64, f64), image::ImageBuffer<image::Rgb<u8>, Vec<u8>>),
+        ((f32, f32), image::ImageBuffer<image::Rgb<u8>, Vec<u8>>),
     )>,
 
     pub detectors: BlobDetectors,
@@ -46,11 +46,17 @@ impl OptimizeData {
         (1, 254),
     ];
 
-    pub const PARAM_RANGES: [(f64, f64); 4] = [
+    pub const PARAM_RANGES: [(f32, f32); 7] = [
+        /// min_threshold
+        (1., 100.),
+        /// max_threshold
+        (50., 250.),
+        // /// threshold_step
+        // (1., 10.),
         /// min_area
         (1000., 15_000.),
-        // /// max_area
-        // (5000., 20_000.),
+        /// max_area
+        (2000., 50_000.),
         /// min_circularity
         (0.2, 0.8),
         /// min_convexity
@@ -62,9 +68,9 @@ impl OptimizeData {
 
 impl CostFunction for OptimizeData {
     // type Param = Vec<i32>;
-    type Param = Vec<f64>;
+    type Param = Vec<f32>;
 
-    type Output = f64;
+    type Output = f32;
 
     fn cost(&self, param: &Self::Param) -> std::result::Result<Self::Output, Error> {
         let mut ps = self.params.clone();
@@ -86,20 +92,46 @@ impl Operator for OptimizeData {
     }
 }
 
-#[cfg(feature = "nope")]
+// #[cfg(feature = "nope")]
 impl Anneal for OptimizeData {
     // type Param = Vec<i32>;
     // type Output = Vec<i32>;
-    type Param = Array1<f64>;
-    type Output = Array1<f64>;
-    type Float = f64;
+    type Param = Vec<f32>;
+    type Output = Vec<f32>;
+    type Float = f32;
 
     fn anneal(
         &self,
         param: &Self::Param,
         extent: Self::Float,
     ) -> std::result::Result<Self::Output, Error> {
-        unimplemented!()
+        let mut rng = self.rng.lock().unwrap();
+        let mut new_params: Self::Output = param
+            .iter()
+            .enumerate()
+            .map(|(i, &current_val)| {
+                let (min, max) = Self::PARAM_RANGES[i];
+                // Calculate perturbation as a fraction of the parameter's range, scaled by extent
+                let range = max - min;
+                let step = range * extent; // Base step size on range and temperature
+                let perturbation = rng.random_range(-step..=step);
+                let new_val = current_val + perturbation;
+                // Clamp to ensure within valid bounds
+                new_val.clamp(min, max)
+            })
+            .collect();
+
+        // // Ensure min_threshold is less than max_threshold
+        // new_params[1] = (new_params[0] + new_params[2] + 1.0).max(new_params[1]);
+
+        // // Ensure min_area is less than max_area
+        // new_params[4] = (new_params[3] + 1.0).max(new_params[3]);
+
+        new_params[1] = (new_params[0] + 2.0).max(new_params[1]);
+
+        new_params[3] = (new_params[2] + 1.0).max(new_params[3]);
+
+        Ok(new_params)
     }
 
     #[cfg(feature = "nope")]
@@ -149,7 +181,10 @@ impl OptimizeData {
 
         for (path, target) in saved_targets.targets.iter() {
             let mut image = image::open(path)?.into_rgb8();
-            images.push((path.to_string_lossy().to_string(), (target.clone(), image)));
+            images.push((
+                path.to_string_lossy().to_string(),
+                ((target.0 as f32, target.1 as f32), image),
+            ));
         }
 
         let detectors = BlobDetectors::new()?;
@@ -166,20 +201,24 @@ impl OptimizeData {
 
 /// Blob Detector
 impl OptimizeData {
-    pub fn apply_params(blob_params: &mut SimpleBlobDetector_Params, params: &Vec<f64>) {
+    pub fn apply_params(blob_params: &mut SimpleBlobDetector_Params, params: &Vec<f32>) {
         debug!("Applying params: {:?}", params);
-        blob_params.min_area = params[0] as f32;
-        // blob_params.min_circularity = params[1] as f32;
-        // blob_params.min_convexity = params[2] as f32;
-        // blob_params.min_inertia_ratio = params[3] as f32;
+        blob_params.min_threshold = params[0];
+        blob_params.max_threshold = params[1];
+        // blob_params.threshold_step = params[2];
+        blob_params.min_area = params[2];
+        blob_params.max_area = params[3];
+        blob_params.min_circularity = params[4];
+        blob_params.min_convexity = params[5];
+        blob_params.min_inertia_ratio = params[6];
     }
 
-    pub fn evaluate(&self, settings: &SimpleBlobDetector_Params) -> Result<f64> {
+    pub fn evaluate(&self, settings: &SimpleBlobDetector_Params) -> Result<f32> {
         // let mut detectors = self.detectors.make_clone().unwrap();
         let mut detectors = BlobDetectors::new_with_params(settings.clone())?;
 
-        let mut errors: Vec<(f64, f64)> = vec![];
-        let mut misses: Vec<String> = vec![];
+        let mut errors: Vec<(f32, f32)> = vec![];
+        let mut misses: usize = 0;
 
         // debug!("blur_kernel_size: {}", settings.blur_kernel_size);
         // debug!("blur_sigma: {}", settings.blur_sigma);
@@ -202,6 +241,7 @@ impl OptimizeData {
             };
 
             if let Some((x, y, radius)) = result {
+                let (x, y) = (x as f32, y as f32);
                 let error_x = target.0 - x;
                 let error_y = target.1 - y;
 
@@ -209,6 +249,8 @@ impl OptimizeData {
                 let error_y = target.1 - y;
 
                 errors.push((error_x, error_y));
+            } else {
+                misses += 1;
             }
         }
 
@@ -228,16 +270,22 @@ impl OptimizeData {
         }
 
         let avg_error = (
-            total_error.0 / errors.len() as f64,
-            total_error.1 / errors.len() as f64,
+            total_error.0 / errors.len() as f32,
+            total_error.1 / errors.len() as f32,
         );
 
+        debug!("Errors: {:?}", errors.len());
+        debug!("Misses: {:?}", misses);
         debug!("Average Error: {:.1}, {:.1}", avg_error.0, avg_error.1);
 
-        let mut average_dist_err = total_dist_err / errors.len() as f64;
+        let mut average_dist_err = total_dist_err / errors.len() as f32;
 
-        for _ in misses.iter() {
+        for _ in 0..misses {
             average_dist_err += 1000.0;
+        }
+
+        if average_dist_err.is_nan() {
+            return Ok(1e30);
         }
 
         // Ok((avg_error.0 + avg_error.1) / 2.)
@@ -245,26 +293,77 @@ impl OptimizeData {
         Ok(average_dist_err)
     }
 
-    #[cfg(feature = "nope")]
+    // #[cfg(feature = "nope")]
     pub fn optimize() -> Result<()> {
         debug!("Optimizing...");
 
         let data = OptimizeData::load().unwrap();
 
-        let mut params = vec![1000.];
+        let t0 = std::time::Instant::now();
 
-        let e = data.cost(&params)?;
-        debug!("Cost: {}", e);
+        let mut init_guess: Vec<f32> = OptimizeData::PARAM_RANGES
+            .iter()
+            .map(|(min, max)| (*min as f32 + *max as f32) / 2.)
+            .collect();
 
-        let mut params = vec![8000.];
+        init_guess[0] = 50.;
+        init_guess[1] = 100.;
+        // init_guess[2] = 1.;
+        init_guess[2] = 1000.;
+        init_guess[3] = 50_000.;
+        init_guess[4] = 0.75;
+        init_guess[5] = 0.8;
+        init_guess[6] = 0.2;
 
-        let e = data.cost(&params)?;
-        debug!("Cost: {}", e);
+        data.cost(&init_guess).unwrap();
+
+        let t1 = std::time::Instant::now();
+
+        debug!("Time: {:.1}", t1.duration_since(t0).as_micros() / 1_000);
 
         Ok(())
     }
 
-    // #[cfg(feature = "nope")]
+    #[cfg(feature = "nope")]
+    /// Simulated Annealing optimization
+    pub fn optimize() -> Result<()> {
+        debug!("Optimizing...");
+
+        let data = OptimizeData::load().unwrap();
+
+        let init_guess: Vec<f32> = OptimizeData::PARAM_RANGES
+            .iter()
+            .map(|(min, max)| (*min as f32 + *max as f32) / 2.)
+            .collect();
+
+        let solver = SimulatedAnnealing::new(15.0)?
+            // Optional: Define temperature function (defaults to `SATempFunc::TemperatureFast`)
+            .with_temp_func(argmin::solver::simulatedannealing::SATempFunc::Boltzmann);
+
+        let executor = Executor::new(data, solver)
+            .configure(|state| {
+                state
+                    .param(init_guess.clone())
+                    .max_iters(1000)
+                    .target_cost(0.0)
+            })
+            .add_observer(
+                SlogLogger::term(),
+                argmin::core::observers::ObserverMode::Always,
+            );
+
+        debug!("Starting optimization...");
+        let result = executor.run().unwrap();
+
+        debug!("Done");
+
+        debug!("Result: {}", result);
+
+        Ok(())
+    }
+
+    /// Nelder-Mead optimization
+    #[cfg(feature = "nope")]
     pub fn optimize() -> Result<()> {
         debug!("Optimizing...");
 
@@ -288,7 +387,7 @@ impl OptimizeData {
             simplex.push(perturbed_point);
         }
 
-        let nelder_mead = NelderMead::new(simplex);
+        let nelder_mead = NelderMead::new(simplex).with_sd_tolerance(0.0001)?;
 
         let executor = Executor::new(data, nelder_mead)
             .configure(|state| {
