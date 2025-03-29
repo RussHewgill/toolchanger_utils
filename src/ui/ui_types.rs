@@ -38,7 +38,7 @@ pub struct App {
     #[serde(skip)]
     pub webcam_settings_prev: crate::vision::VisionSettings,
 
-    pub webcam_settings: crate::vision::VisionSettings,
+    pub vision_settings: crate::vision::VisionSettings,
 
     #[serde(skip)]
     pub webcam_settings_mutex: Arc<Mutex<crate::vision::VisionSettings>>,

@@ -41,7 +41,7 @@ fn main() -> opencv::Result<()> {
     Ok(())
 }
 
-// #[cfg(feature = "nope")]
+#[cfg(feature = "nope")]
 fn main() -> Result<()> {
     logging::init_logs();
 
@@ -49,11 +49,19 @@ fn main() -> Result<()> {
 
     let p = (50., 50., 10.);
 
-    for _ in 0..30 {
+    for _ in 0..50 {
         avg.add_frame(Some(p));
     }
-    for _ in 0..10 {
+    for i in 0..10 {
         avg.add_frame(None);
+        if let Some((confidence, (c_x, c_y, c_r))) = avg.confidence() {
+            eprintln!(
+                "Confidence[{}]: {:.3}, ({:.4}, {:.4}, r = {:.1})",
+                i, confidence, c_x, c_y, c_r
+            );
+        } else {
+            eprintln!("No confidence");
+        }
     }
 
     if let Some((confidence, (c_x, c_y, c_r))) = avg.confidence() {
@@ -78,7 +86,7 @@ fn main() -> Result<()> {
 }
 
 /// Main App
-#[cfg(feature = "nope")]
+// #[cfg(feature = "nope")]
 #[cfg(not(feature = "tests"))]
 fn main() -> eframe::Result<()> {
     use ui::ui_types::App;

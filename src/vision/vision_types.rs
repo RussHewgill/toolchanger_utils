@@ -332,6 +332,7 @@ pub struct VisionSettings {
     // pub rotate: usize,
     pub preprocess_pipeline: usize,
     pub target_radius: f64,
+    pub prescale: f64,
 }
 
 impl VisionSettings {
@@ -360,11 +361,12 @@ impl Default for VisionSettings {
             use_hough: true,
             draw_circle: true,
             crosshair_size: 60.,
-            pixels_per_mm: 200.,
+            pixels_per_mm: 138.,
             // mirror: (false, false),
             // rotate: 3,
             preprocess_pipeline: 0,
             target_radius: 27.,
+            prescale: 1.0,
         }
     }
 }

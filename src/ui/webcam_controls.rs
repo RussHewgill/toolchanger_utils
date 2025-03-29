@@ -17,7 +17,7 @@ impl App {
         ui.label("Filter Step");
         let resp = ui.add(
             egui::Slider::new(
-                &mut self.webcam_settings.filter_step,
+                &mut self.vision_settings.filter_step,
                 0..=VisionSettings::NUM_FILTER_STEPS,
             )
             .integer(),
@@ -35,9 +35,9 @@ impl App {
             });
             if let Some(delta) = delta {
                 if delta.y > 0. {
-                    self.webcam_settings.filter_step += 1;
-                } else if delta.y < 0. && self.webcam_settings.filter_step > 0 {
-                    self.webcam_settings.filter_step -= 1;
+                    self.vision_settings.filter_step += 1;
+                } else if delta.y < 0. && self.vision_settings.filter_step > 0 {
+                    self.vision_settings.filter_step -= 1;
                 }
             }
         }
@@ -45,7 +45,7 @@ impl App {
 
         ui.label("Pipeline");
         let resp = ui
-            .add(egui::Slider::new(&mut self.webcam_settings.preprocess_pipeline, 0..=3).integer());
+            .add(egui::Slider::new(&mut self.vision_settings.preprocess_pipeline, 0..=3).integer());
         if resp.hovered() {
             let delta = ui.input(|i| {
                 i.events.iter().find_map(|e| match e {
@@ -59,9 +59,9 @@ impl App {
             });
             if let Some(delta) = delta {
                 if delta.y > 0. {
-                    self.webcam_settings.preprocess_pipeline += 1;
-                } else if delta.y < 0. && self.webcam_settings.preprocess_pipeline > 0 {
-                    self.webcam_settings.preprocess_pipeline -= 1;
+                    self.vision_settings.preprocess_pipeline += 1;
+                } else if delta.y < 0. && self.vision_settings.preprocess_pipeline > 0 {
+                    self.vision_settings.preprocess_pipeline -= 1;
                 }
             }
         }
@@ -73,7 +73,7 @@ impl App {
 
         ui.label("Threshold Block Size");
         let resp = ui.add(
-            egui::DragValue::new(&mut self.webcam_settings.threshold_block_size)
+            egui::DragValue::new(&mut self.vision_settings.threshold_block_size)
                 .speed(1.0)
                 .fixed_decimals(0)
                 .range(0..=255),
@@ -97,9 +97,9 @@ impl App {
             });
             if let Some(delta) = delta {
                 if delta.y > 0. {
-                    self.webcam_settings.threshold_block_size += 2;
+                    self.vision_settings.threshold_block_size += 2;
                 } else if delta.y < 0. {
-                    self.webcam_settings.threshold_block_size -= 2;
+                    self.vision_settings.threshold_block_size -= 2;
                 }
             }
         }
@@ -115,7 +115,7 @@ impl App {
 
         ui.label("Threshold Type");
         let resp =
-            ui.add(egui::Slider::new(&mut self.webcam_settings.threshold_type, 0..=2).integer());
+            ui.add(egui::Slider::new(&mut self.vision_settings.threshold_type, 0..=2).integer());
         // ui.radio_value(&mut self.webcam_settings.threshold_type, 0, "Binary");
         // ui.radio_value(&mut self.webcam_settings.threshold_type, 1, "Triangle");
         // ui.radio_value(&mut self.webcam_settings.threshold_type, 2, "Otsu");
@@ -132,9 +132,9 @@ impl App {
             });
             if let Some(delta) = delta {
                 if delta.y > 0. {
-                    self.webcam_settings.threshold_type += 1;
-                } else if delta.y < 0. && self.webcam_settings.threshold_type > 0 {
-                    self.webcam_settings.threshold_type -= 1;
+                    self.vision_settings.threshold_type += 1;
+                } else if delta.y < 0. && self.vision_settings.threshold_type > 0 {
+                    self.vision_settings.threshold_type -= 1;
                 }
             }
         }
@@ -142,7 +142,7 @@ impl App {
 
         ui.label("Blur Kernel Size");
         let resp = ui.add(
-            egui::DragValue::new(&mut self.webcam_settings.blur_kernel_size)
+            egui::DragValue::new(&mut self.vision_settings.blur_kernel_size)
                 .speed(1.0)
                 .fixed_decimals(0),
         );
@@ -159,9 +159,9 @@ impl App {
             });
             if let Some(delta) = delta {
                 if delta.y > 0. {
-                    self.webcam_settings.blur_kernel_size += 2;
+                    self.vision_settings.blur_kernel_size += 2;
                 } else if delta.y < 0. {
-                    self.webcam_settings.blur_kernel_size -= 2;
+                    self.vision_settings.blur_kernel_size -= 2;
                 }
             }
         }
@@ -169,7 +169,7 @@ impl App {
 
         ui.label("Blur Sigma");
         let resp = ui.add(
-            egui::DragValue::new(&mut self.webcam_settings.blur_sigma)
+            egui::DragValue::new(&mut self.vision_settings.blur_sigma)
                 .speed(0.1)
                 .fixed_decimals(1),
         );
@@ -186,25 +186,25 @@ impl App {
             });
             if let Some(delta) = delta {
                 if delta.y > 0. {
-                    self.webcam_settings.blur_sigma += 0.25;
+                    self.vision_settings.blur_sigma += 0.25;
                 } else if delta.y < 0. {
-                    self.webcam_settings.blur_sigma -= 0.25;
+                    self.vision_settings.blur_sigma -= 0.25;
                 }
             }
         }
         ui.end_row();
 
         ui.label("Draw Circle");
-        ui.checkbox(&mut self.webcam_settings.draw_circle, "");
+        ui.checkbox(&mut self.vision_settings.draw_circle, "");
         ui.end_row();
 
         ui.label("Use Hough");
-        ui.checkbox(&mut self.webcam_settings.use_hough, "");
+        ui.checkbox(&mut self.vision_settings.use_hough, "");
         ui.end_row();
 
         ui.label("Pixels to mm");
         ui.add(
-            egui::DragValue::new(&mut self.webcam_settings.pixels_per_mm)
+            egui::DragValue::new(&mut self.vision_settings.pixels_per_mm)
                 .speed(0.1)
                 .fixed_decimals(2),
         );
@@ -212,10 +212,19 @@ impl App {
 
         ui.label("Target Radius");
         ui.add(
-            egui::DragValue::new(&mut self.webcam_settings.target_radius)
+            egui::DragValue::new(&mut self.vision_settings.target_radius)
                 .speed(1.)
                 .fixed_decimals(0)
                 .range(0.0..=150.0),
+        );
+        ui.end_row();
+
+        ui.label("Camera Prescale");
+        ui.add(
+            egui::DragValue::new(&mut self.vision_settings.prescale)
+                .speed(0.5)
+                .fixed_decimals(2)
+                .range(1.0..=10.0),
         );
         ui.end_row();
 
@@ -225,10 +234,10 @@ impl App {
         // self.webcam_camera_controls(ui);
         // ui.end_row();
 
-        if self.webcam_settings != self.webcam_settings_prev {
+        if self.vision_settings != self.webcam_settings_prev {
             let mut settings = self.webcam_settings_mutex.lock().unwrap();
-            *settings = self.webcam_settings;
-            self.webcam_settings_prev = self.webcam_settings.clone();
+            *settings = self.vision_settings;
+            self.webcam_settings_prev = self.vision_settings.clone();
         }
     }
 

@@ -5,15 +5,12 @@ pub mod running_average;
 pub mod utilities;
 pub mod vision_types;
 
-use self::locate_nozzle::*;
-
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex},
 };
 
 use anyhow::{anyhow, bail, ensure, Context, Result};
-use blob_detection::BlobDetectors;
 use tracing::{debug, error, info, trace, warn};
 
 use nokhwa::{
@@ -26,8 +23,10 @@ use opencv::{
     videoio,
 };
 
+use self::locate_nozzle::*;
 pub use self::vision_types::*;
 use crate::ui::data_labeling::SavedTargets;
+use blob_detection::BlobDetectors;
 
 pub fn spawn_locator_thread(
     ctx: egui::Context,
@@ -78,8 +77,22 @@ pub fn spawn_locator_thread(
         // }
 
         let mut buffer: image::ImageBuffer<image::Rgb<u8>, Vec<u8>> =
-            // image::ImageBuffer::new(Webcam::SIZE.0 as u32, Webcam::SIZE.1 as u32);
+            // image::ImageBuffer::new(camera_size.0 as u32, camera_size.1 as u32);
             image::ImageBuffer::new(camera_size.0 as u32, camera_size.1 as u32);
+
+        // let mut buffer = image::DynamicImage::from(buffer);
+
+        // let mut buffer2: image::ImageBuffer<image::Rgb<u8>, Vec<u8>> =
+        //     image::ImageBuffer::new(camera_size.0 as u32 * 2, camera_size.1 as u32 * 2);
+
+        // let mut buffer2 = fast_image_resize::images::Image::new(
+        //     camera_size.0 as u32 * 2,
+        //     camera_size.1 as u32 * 2,
+        //     // buffer.pixel_type().unwrap(),
+        //     fast_image_resize::PixelType::U8x3,
+        // );
+
+        // let mut resizer = fast_image_resize::Resizer::new();
 
         let mut detectors = BlobDetectors::new().unwrap();
 
@@ -97,6 +110,8 @@ pub fn spawn_locator_thread(
                 SavedTargets::default()
             }
         };
+
+        let mut prev_frame_time = std::time::Instant::now();
 
         eprintln!("Starting camera loop");
         loop {
@@ -116,19 +131,26 @@ pub fn spawn_locator_thread(
                 }
             }
 
-            std::thread::sleep(std::time::Duration::from_millis(34));
+            if prev_frame_time.elapsed() < std::time::Duration::from_millis(15) {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+                continue;
+            }
+
+            // std::thread::sleep(std::time::Duration::from_millis(15));
+            // std::thread::sleep(std::time::Duration::from_millis(34));
             // std::thread::sleep(std::time::Duration::from_millis(50));
             // std::thread::sleep(std::time::Duration::from_millis(200));
             // std::thread::sleep(std::time::Duration::from_millis(1000));
 
             let Ok(frame) = camera.frame() else {
-                eprintln!("Failed to get frame");
+                // eprintln!("Failed to get frame");
                 continue;
             };
 
             let res = frame.resolution();
 
             frame
+                // .decode_image_to_buffer::<RgbFormat>(buffer.as_mut_rgb8().unwrap())
                 .decode_image_to_buffer::<RgbFormat>(&mut buffer)
                 .unwrap();
 
@@ -208,7 +230,19 @@ pub fn spawn_locator_thread(
 
             let t0 = std::time::Instant::now();
 
-            match locate_nozzle(&mut buffer, &settings, &mut detectors) {
+            // scale buffer to 2x, and place in buffer2
+
+            // resizer.resize_typed(&buffer, &mut buffer2, None).unwrap();
+
+            let filter = image::imageops::FilterType::Triangle;
+            // let filter = image::imageops::FilterType::Nearest;
+
+            // let mut buffer2 =
+            //     image::imageops::resize(&buffer, buffer.width() * 2, buffer.height() * 2, filter);
+
+            // let mut buffer = resizer.resize(&buffer, dst_image, options)
+
+            match locate_nozzle(&buffer, &settings, &mut detectors) {
                 Ok((img_out, circle)) => {
                     // debug!("Nozzle located");
                     utilities::mat_to_imagebuffer(&mut buffer, &img_out).unwrap();
@@ -232,60 +266,11 @@ pub fn spawn_locator_thread(
                 }
             }
 
-            #[cfg(feature = "nope")]
-            if settings.draw_circle {
-                if let Some(circle) = circle {
-                    let mut img_color = Mat::new_rows_cols_with_default(
-                        img.rows(),
-                        img.cols(),
-                        opencv::core::CV_8UC3,
-                        0.0f64.into(),
-                    )
-                    .unwrap();
+            // buffer = image::imageops::resize(&buffer2, buffer.width(), buffer.height(), filter);
 
-                    if img.data_bytes().unwrap().len() != buffer.len() {
-                        opencv::imgproc::cvt_color(
-                            &img,
-                            &mut img_color,
-                            // COLOR_BGR2GRAY,
-                            opencv::imgproc::COLOR_GRAY2RGB,
-                            0,
-                            opencv::core::AlgorithmHint::ALGO_HINT_DEFAULT,
-                        )
-                        .unwrap();
-                        // std::mem::swap(&mut img, &mut img2);
-                    } else {
-                        img_color = img.clone();
-                    }
-
-                    // Draw the detected circle
-                    let center = opencv::core::Point::new(circle.0 as i32, circle.1 as i32);
-                    // let center = opencv::core::Point::new(322, 241);
-                    let radius = circle.2 as i32;
-                    // let radius = 20;
-
-                    let color = opencv::core::Scalar::new(0., 255., 0., 0.);
-                    let thickness = 2;
-
-                    opencv::imgproc::circle(
-                        &mut img_color,
-                        center,
-                        radius,
-                        color,
-                        thickness,
-                        16,
-                        0,
-                    )
-                    .unwrap();
-                }
-            }
-
-            // let t1 = std::time::Instant::now();
-            // let elapsed = t1.duration_since(t0);
-            // debug!(
-            //     "Elapsed time: {:.1} ms",
-            //     elapsed.as_micros() as f64 / 1000.0
-            // );
+            let t1 = std::time::Instant::now();
+            let elapsed = t1.duration_since(t0);
+            debug!("Frame time: {:.1} ms", elapsed.as_micros() as f64 / 1000.0);
 
             let mut img = egui::ColorImage::from_rgb(
                 [res.width() as usize, res.height() as usize],

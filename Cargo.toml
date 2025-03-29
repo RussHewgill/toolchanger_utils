@@ -54,6 +54,7 @@ argmin-observer-slog = "0.1.0"
 ndarray = "0.16.1"
 
 url = "2.5.4"
+fast_image_resize = { version = "5.1.2", features = ["image", "rayon"] }
 
 # egui_struct = "0.4.2"
 # rust-i18n = "3.1.3"

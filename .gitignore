@@ -16,3 +16,4 @@ test_images/*
 config.toml
 auto_offset2.rs
 saved_data.toml
+*data.txt

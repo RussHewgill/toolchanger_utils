@@ -316,6 +316,25 @@ pub fn locate_nozzle(
     detectors: &mut BlobDetectors,
 ) -> Result<(Mat, Option<(f64, f64, f64)>)> {
     let mut img = utilities::imagebuffer_to_mat(img0)?;
+    let img2 = img.clone();
+    let mut img_out2 = img.clone();
+
+    // debug!("Image size 0: {}x{}", img.cols(), img.rows());
+
+    if settings.prescale > 1.0 {
+        opencv::imgproc::resize(
+            &img2,
+            &mut img,
+            Size::default(),
+            settings.prescale,
+            settings.prescale,
+            imgproc::INTER_LINEAR,
+        )
+        .unwrap();
+    }
+
+    // debug!("Image size 1: {}x{}", img.cols(), img.rows());
+
     let mut img2 = img.clone();
 
     // Adjust gamma to 1.2
@@ -328,9 +347,9 @@ pub fn locate_nozzle(
     opencv::core::lut(&img, &lut, &mut img2)?;
     std::mem::swap(&mut img, &mut img2);
 
-    opencv::imgcodecs::imwrite(&format!("test0.jpg"), &img, &opencv::core::Vector::new()).unwrap();
+    // opencv::imgcodecs::imwrite(&format!("test0.jpg"), &img, &opencv::core::Vector::new()).unwrap();
 
-    let (mut img_out, mat0) = preprocess_0(&img, settings, 0, true)?;
+    let (mut img_out, mat0) = preprocess_0(&img, settings, 0, false)?;
     // let (_, mat1) = preprocess_0(&img, settings, 1, false)?;
     // let mat1 = preprocess_1(&img, settings)?;
     // let mat2 = preprocess_2(&img, settings)?;
@@ -345,6 +364,23 @@ pub fn locate_nozzle(
     //     // 2 => mat2,
     //     _ => bail!("Invalid preprocess pipeline"),
     // };
+
+    /// scale down
+    if settings.prescale > 1.0 {
+        let size = img_out2.size().unwrap();
+        opencv::imgproc::resize(
+            &img_out,
+            &mut img_out2,
+            // &mut img_out2,
+            size,
+            0.,
+            0.,
+            imgproc::INTER_AREA,
+        )
+        .unwrap();
+    } else {
+        img_out2 = img_out.clone();
+    }
 
     /// Find keypoints
     if settings.use_hough {
@@ -414,25 +450,31 @@ pub fn locate_nozzle(
         // }
 
         if let Ok(keypoint) = detectors.keypoints.get(0) {
-            let x = keypoint.pt().x;
-            let y = keypoint.pt().y;
-            let radius = keypoint.size() / 2.0;
-
-            // debug!("Keypoint: ({}, {}), radius: {}", x, y, radius);
+            let (x, y, radius) = if settings.prescale > 1.0 {
+                let x = keypoint.pt().x / settings.prescale as f32;
+                let y = keypoint.pt().y / settings.prescale as f32;
+                let radius = keypoint.size() / 2.0 / settings.prescale as f32;
+                (x, y, radius)
+            } else {
+                let x = keypoint.pt().x;
+                let y = keypoint.pt().y;
+                let radius = keypoint.size() / 2.0;
+                (x, y, radius)
+            };
 
             best_circle = Some((x as f64, y as f64, radius as f64));
 
             if settings.draw_circle {
                 let mut img_color = Mat::new_rows_cols_with_default(
-                    img_out.rows(),
-                    img_out.cols(),
+                    img_out2.rows(),
+                    img_out2.cols(),
                     opencv::core::CV_8UC3,
                     0.0f64.into(),
                 )?;
 
-                if img_out.data_bytes().unwrap().len() != img0.len() {
+                if img_out2.data_bytes().unwrap().len() != img0.len() {
                     cvt_color(
-                        &img_out,
+                        &img_out2,
                         &mut img_color,
                         // COLOR_BGR2GRAY,
                         opencv::imgproc::COLOR_GRAY2RGB,
@@ -442,7 +484,7 @@ pub fn locate_nozzle(
                     .unwrap();
                     // std::mem::swap(&mut img, &mut img2);
                 } else {
-                    img_color = img_out.clone();
+                    img_color = img_out2.clone();
                 }
 
                 let center = opencv::core::Point::new(x as i32, y as i32);
@@ -457,7 +499,7 @@ pub fn locate_nozzle(
                 // let color = opencv::core::Scalar::new(255., 255., 0., 0.);
                 // opencv::imgproc::circle(&mut img_color, center, radius / 2, color, 1, 16, 0)?;
 
-                img_out = img_color;
+                img_out2 = img_color;
             }
 
             // let area = keypoint.size().powi(2) * std::f32::consts::PI;
@@ -465,7 +507,7 @@ pub fn locate_nozzle(
         }
     }
 
-    Ok((img_out, best_circle))
+    Ok((img_out2, best_circle))
 }
 
 pub fn preprocess_0(

@@ -29,7 +29,7 @@ impl App {
         };
 
         let mut webcam_settings = out.webcam_settings_mutex.lock().unwrap();
-        *webcam_settings = out.webcam_settings;
+        *webcam_settings = out.vision_settings;
         drop(webcam_settings);
 
         if let Err(e) = crate::appconfig::read_options_from_file("config.toml", &mut out.options) {
@@ -119,9 +119,16 @@ impl App {
                 button
             };
             if ui.add(button).clicked() {
-                if let Some((x, y, _)) = self.get_position() {
-                    if let Some(tool) = self.active_tool {
-                        self.auto_offset.start_single((x, y), tool as i32);
+                if matches!(
+                    self.auto_offset.auto_offset_type(),
+                    auto_offset::AutoOffsetType::SingleTool
+                ) {
+                    self.auto_offset.stop();
+                } else {
+                    if let Some((x, y, _)) = self.get_position() {
+                        if let Some(tool) = self.active_tool {
+                            self.auto_offset.start_single((x, y), tool as i32);
+                        }
                     }
                 }
             }
@@ -715,7 +722,16 @@ impl App {
         let texture = match &self.webcam_texture {
             Some(texture) => texture,
             None => {
-                let image = egui::ColorImage::new([1280, 800], egui::Color32::from_gray(220));
+                // let image = egui::ColorImage::new([1280, 800], egui::Color32::from_gray(220));
+                let image = egui::ColorImage::new(
+                    [
+                        // self.options.camera_size.0 as usize * 2,
+                        // self.options.camera_size.1 as usize * 2,
+                        self.options.camera_size.0 as usize,
+                        self.options.camera_size.1 as usize,
+                    ],
+                    egui::Color32::from_gray(220),
+                );
 
                 let texture = ui
                     .ctx()
@@ -723,7 +739,7 @@ impl App {
 
                 self.webcam_texture = Some(texture.clone());
 
-                let (tx_to_ui, rx_to_ui) = crossbeam_channel::unbounded();
+                let (tx_to_ui, rx_to_ui) = crossbeam_channel::bounded(1);
                 self.channel_to_ui = Some(rx_to_ui);
 
                 let (tx_to_vision, rx_to_vision) = crossbeam_channel::bounded(10);
@@ -795,9 +811,9 @@ impl App {
             });
             if let Some(delta) = delta {
                 if delta.y > 0. {
-                    self.webcam_settings.target_radius += 0.5;
-                } else if delta.y < 0. && self.webcam_settings.target_radius > 0. {
-                    self.webcam_settings.target_radius -= 0.5;
+                    self.vision_settings.target_radius += 0.5;
+                } else if delta.y < 0. && self.vision_settings.target_radius > 0. {
+                    self.vision_settings.target_radius -= 0.5;
                 }
             }
         }
@@ -809,7 +825,7 @@ impl App {
             // let pos = pos + egui::Vec2::from([c.min.x, c.min.y]);
             let pos = pos + egui::Vec2::from([rect.min.x, rect.min.y]);
 
-            let radius = self.webcam_settings.target_radius as f32;
+            let radius = self.vision_settings.target_radius as f32;
 
             painter.circle_stroke(pos, radius, egui::Stroke::new(1.0, egui::Color32::RED));
 

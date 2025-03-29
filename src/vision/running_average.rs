@@ -43,9 +43,13 @@ impl Default for CircleAggregator {
 impl CircleAggregator {
     pub fn clear(&mut self) {
         self.buffer.clear();
+        self.sum = (0., 0., 0.);
+        self.sum_sq = (0., 0., 0.);
+        self.valid = 0;
     }
 
     pub fn add_frame(&mut self, pos: Option<(f64, f64, f64)>) {
+        // debug!("Adding frame: {:?}", pos);
         if self.buffer.len() > self.window_size {
             panic!("Buffer overflow: more than {} elements", self.window_size);
         } else if self.buffer.len() == self.window_size {
@@ -89,10 +93,12 @@ impl CircleAggregator {
 
     pub fn confidence(&self) -> Option<(f64, (f64, f64, f64))> {
         if self.buffer.is_empty() {
+            // warn!("Buffer is empty, cannot calculate confidence");
             return None;
         }
 
         if self.valid < self.min_samples {
+            // warn!("Not enough valid samples to calculate confidence");
             return None;
         }
 
@@ -101,7 +107,12 @@ impl CircleAggregator {
         // Apply a sigmoid-like scaling to the detection rate
         // This makes a few Nones only slightly decrease confidence,
         // while many Nones cause a more dramatic decrease
-        let detection_factor = 1.0 / (1.0 + (-10.0 * (detection_rate - 0.5)).exp());
+
+        let detection_factor = if self.valid == self.buffer.len() {
+            1.0
+        } else {
+            1.0 / (1.0 + (-20.0 * (detection_rate - 0.8)).exp())
+        };
 
         // let n = self.buffer.len() as f64;
         let n = self.valid as f64;

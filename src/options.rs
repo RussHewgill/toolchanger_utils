@@ -12,6 +12,7 @@ pub struct Options {
     pub camera_size: (f64, f64),
     pub camera_scale: f64,
 
+    #[serde(skip)]
     pub auto_offset_settings: AutoOffsetSettings,
 }
 

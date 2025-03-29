@@ -220,13 +220,23 @@ impl OptimizeData {
         let mut errors: Vec<(f32, f32)> = vec![];
         let mut misses: usize = 0;
 
+        let mut debug_output = true;
+        // let mut debug_output = false;
+
+        let output_dir = "test_images/output";
+        if debug_output {
+            if !std::path::Path::new(output_dir).exists() {
+                std::fs::create_dir(output_dir)?;
+            }
+        }
+
         // debug!("blur_kernel_size: {}", settings.blur_kernel_size);
         // debug!("blur_sigma: {}", settings.blur_sigma);
         // debug!("threshold_block_size: {}", settings.threshold_block_size);
 
         // debug!("Skipping all but first");
 
-        for (_, (target, img)) in self.images.iter() {
+        for (path, (target, img)) in self.images.iter() {
             let (mat, result) = match crate::vision::locate_nozzle::locate_nozzle(
                 &img,
                 &self.vision_params,
@@ -237,11 +247,42 @@ impl OptimizeData {
                     error!("Failed to locate nozzle: {}", e);
                     continue;
                 }
-                Ok(result) => result,
+                Ok(result) => {
+                    if debug_output {
+                        let output_path = {
+                            let path = std::path::Path::new(path);
+                            let base = path.parent().unwrap();
+                            let output_path = path.file_stem().unwrap();
+                            base.join(std::path::Path::new("output"))
+                                .join(std::path::Path::new(&format!(
+                                    "{}_output.jpg",
+                                    output_path.to_string_lossy()
+                                )))
+                        };
+
+                        debug!("Saving output to {:?}", output_path);
+                        opencv::imgcodecs::imwrite(
+                            output_path.to_str().unwrap(),
+                            &result.0,
+                            &opencv::core::Vector::new(),
+                        )
+                        .unwrap();
+                    }
+
+                    //
+                    result
+                }
             };
 
             if let Some((x, y, radius)) = result {
+                // let x = x as f32 / self.vision_params.prescale as f32;
+                // let y = y as f32 / self.vision_params.prescale as f32;
+
                 let (x, y) = (x as f32, y as f32);
+
+                debug!("X: {:.4}, Y: {:.4}", x, y);
+
+                // let (x, y) = (x as f32, y as f32);
                 let error_x = target.0 - x;
                 let error_y = target.1 - y;
 
@@ -252,6 +293,9 @@ impl OptimizeData {
             } else {
                 misses += 1;
             }
+
+            debug!("breaking early");
+            break;
         }
 
         let mut total_error = (0.0, 0.0);
@@ -276,7 +320,7 @@ impl OptimizeData {
 
         debug!("Errors: {:?}", errors.len());
         debug!("Misses: {:?}", misses);
-        debug!("Average Error: {:.1}, {:.1}", avg_error.0, avg_error.1);
+        debug!("Average Error: {:.3}, {:.3}", avg_error.0, avg_error.1);
 
         let mut average_dist_err = total_dist_err / errors.len() as f32;
 
@@ -297,7 +341,9 @@ impl OptimizeData {
     pub fn optimize() -> Result<()> {
         debug!("Optimizing...");
 
-        let data = OptimizeData::load().unwrap();
+        let mut data = OptimizeData::load().unwrap();
+
+        data.vision_params.prescale = 2.0;
 
         let t0 = std::time::Instant::now();
 
@@ -308,6 +354,7 @@ impl OptimizeData {
 
         init_guess[0] = 50.;
         init_guess[1] = 100.;
+        // init_guess[1] = init_guess[0];
         // init_guess[2] = 1.;
         init_guess[2] = 1000.;
         init_guess[3] = 50_000.;
