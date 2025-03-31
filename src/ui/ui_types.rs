@@ -71,6 +71,11 @@ pub struct App {
     pub preprocess_add: PreprocessStepType,
 
     pub preprocess_pipeline: Vec<PreprocessStep>,
+
+    #[serde(skip)]
+    pub camera_formats: Vec<crate::vision::vision_types::CameraFormat>,
+    #[serde(skip)]
+    pub selected_camera_format: Option<crate::vision::CameraFormat>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, PartialOrd)]
@@ -92,6 +97,16 @@ pub enum Axis {
     X,
     Y,
     Z,
+}
+
+impl Axis {
+    pub fn to_str(&self) -> &str {
+        match self {
+            Axis::X => "X",
+            Axis::Y => "Y",
+            Axis::Z => "Z",
+        }
+    }
 }
 
 impl Default for Axis {

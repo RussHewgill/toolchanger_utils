@@ -237,6 +237,10 @@ impl OptimizeData {
         // debug!("Skipping all but first");
 
         for (path, (target, img)) in self.images.iter() {
+            if debug_output && path != "test_images/frame_0000.jpg" {
+                continue;
+            }
+
             let (mat, result) = match crate::vision::locate_nozzle::locate_nozzle(
                 &img,
                 &self.vision_params,
@@ -249,6 +253,12 @@ impl OptimizeData {
                 }
                 Ok(result) => {
                     if debug_output {
+                        if let Some(result) = result.1 {
+                            debug!(
+                                "Result: ({:.4}, {:.4}, {:.4})",
+                                result.0, result.1, result.2
+                            );
+                        }
                         let output_path = {
                             let path = std::path::Path::new(path);
                             let base = path.parent().unwrap();
@@ -294,8 +304,10 @@ impl OptimizeData {
                 misses += 1;
             }
 
-            debug!("breaking early");
-            break;
+            if debug_output {
+                debug!("breaking early");
+                break;
+            }
         }
 
         let mut total_error = (0.0, 0.0);
@@ -345,8 +357,6 @@ impl OptimizeData {
 
         data.vision_params.prescale = 2.0;
 
-        let t0 = std::time::Instant::now();
-
         let mut init_guess: Vec<f32> = OptimizeData::PARAM_RANGES
             .iter()
             .map(|(min, max)| (*min as f32 + *max as f32) / 2.)
@@ -356,11 +366,13 @@ impl OptimizeData {
         init_guess[1] = 100.;
         // init_guess[1] = init_guess[0];
         // init_guess[2] = 1.;
-        init_guess[2] = 1000.;
+        init_guess[2] = 2000.;
         init_guess[3] = 50_000.;
         init_guess[4] = 0.75;
         init_guess[5] = 0.8;
         init_guess[6] = 0.2;
+
+        let t0 = std::time::Instant::now();
 
         data.cost(&init_guess).unwrap();
 

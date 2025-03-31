@@ -106,7 +106,15 @@ impl App {
             return;
         };
 
-        if let Err(e) = klipper.move_axis_relative(axis, amount, bounce) {
+        if let Err(e) = klipper.move_axis_relative(
+            axis,
+            amount,
+            if bounce {
+                Some(self.options.bounce_amount)
+            } else {
+                None
+            },
+        ) {
             error!("Failed to move axis: {}", e);
         }
         // self.fetch_position();

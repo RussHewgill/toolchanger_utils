@@ -52,7 +52,7 @@ fn main() -> Result<()> {
     for _ in 0..50 {
         avg.add_frame(Some(p));
     }
-    for i in 0..10 {
+    for i in 0..0 {
         avg.add_frame(None);
         if let Some((confidence, (c_x, c_y, c_r))) = avg.confidence() {
             eprintln!(

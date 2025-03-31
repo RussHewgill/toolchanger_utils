@@ -21,13 +21,54 @@ pub enum NozzlePosition {
 pub enum WebcamCommand {
     SaveScreenshot(Option<(f64, f64)>),
     SetCameraControl(CameraControl),
+    GetCameraFormats,
+    SetCameraFormat(CameraFormat),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WebcamMessage {
     /// X, Y, radius
     FoundNozzle((f64, f64, f64)),
     NozzleNotFound,
+    CameraFormats(Vec<CameraFormat>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CameraFormat {
+    pub size: (u32, u32),
+    pub format: u32,
+    pub framerate: u32,
+}
+
+impl CameraFormat {
+    pub fn new(fmt: nokhwa::utils::CameraFormat) -> Self {
+        Self {
+            size: (fmt.width(), fmt.height()),
+            format: fmt.format() as u32,
+            framerate: fmt.frame_rate(),
+        }
+    }
+
+    pub fn to_string(&self) -> String {
+        format!(
+            "{}x{} {}fps, {}",
+            self.size.0,
+            self.size.1,
+            self.framerate,
+            self.get_format()
+        )
+    }
+
+    fn get_format(&self) -> &str {
+        match self.format {
+            0 => "MJPEG",
+            1 => "YUYV",
+            2 => "NV12",
+            3 => "GRAY",
+            4 => "RAWRGB",
+            _ => "Unknown",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]

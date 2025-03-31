@@ -44,5 +44,36 @@ impl App {
         //     ui.label("Camera Index:");
         //     ui.text_edit_singleline(&mut self.options.camera_index);
         // });
+
+        ui.separator();
+
+        ui.horizontal(|ui| {
+            egui::ComboBox::new("Camera Format", "Camera Format")
+                // .selected_text(self.selected_camera_format.as_ref().map_or("None".to_string(), |f| f))
+                .show_ui(ui, |ui| {
+                    if self.camera_formats.len() == 0 {
+                        if let Err(e) = self
+                            .channel_to_vision
+                            .as_ref()
+                            .unwrap()
+                            .send(crate::vision::WebcamCommand::GetCameraFormats)
+                        {
+                            error!("Failed to send command to webcam thread: {}", e);
+                        }
+                    } else {
+                        for format in &self.camera_formats {
+                            ui.selectable_value(
+                                &mut self.selected_camera_format,
+                                Some(*format),
+                                format.to_string(),
+                            );
+                        }
+                    }
+
+                    // ui.selectable_value(&mut self.options.camera_size, (1280., 800.), "1280x800");
+                    // ui.selectable_value(&mut self.options.camera_size, (1920., 1080.), "1920x1080");
+                    // ui.selectable_value(&mut self.options.camera_size, (3840., 2160.), "3840x2160");
+                });
+        });
     }
 }

@@ -31,7 +31,8 @@ impl BlobDetectors {
             threshold_step: 25.0,
 
             filter_by_area: true,
-            min_area: 1000.,
+            // min_area: 1000.,
+            min_area: 2000.,
             max_area: 50_000.,
 
             filter_by_circularity: true,

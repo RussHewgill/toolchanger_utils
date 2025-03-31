@@ -349,12 +349,29 @@ pub fn locate_nozzle(
 
     // opencv::imgcodecs::imwrite(&format!("test0.jpg"), &img, &opencv::core::Vector::new()).unwrap();
 
-    let (mut img_out, mat0) = preprocess_0(&img, settings, 0, false)?;
-    // let (_, mat1) = preprocess_0(&img, settings, 1, false)?;
+    // let (thresh0, thresh1) = if settings.threshold_type == 1 {
+    //     (1, 2)
+    // } else if settings.threshold_type == 2 {
+    //     (2, 1)
+    // } else {
+    //     (0, 0)
+    // };
+
+    let (img_out_pre0, mat0) = preprocess_0(&img, settings, 0, false)?;
+    let (img_out_pre1, mat1) = preprocess_0(&img, settings, 1, false)?;
+    let (img_out_pre2, mat2) = preprocess_0(&img, settings, 2, false)?;
     // let mat1 = preprocess_1(&img, settings)?;
     // let mat2 = preprocess_2(&img, settings)?;
     drop(img);
     drop(img2);
+
+    /// setting filter type only changes which is displayed in UI
+    let img_out = match settings.threshold_type {
+        0 => img_out_pre0.clone(),
+        1 => img_out_pre1.clone(),
+        2 => img_out_pre2.clone(),
+        _ => bail!("Invalid threshold type"),
+    };
 
     let mut best_circle: Option<(f64, f64, f64)> = None;
 
@@ -382,7 +399,75 @@ pub fn locate_nozzle(
         img_out2 = img_out.clone();
     }
 
+    // #[cfg(feature = "nope")]
+    if settings.use_hough {
+        let Some(color) = locate_keypoints(settings, detectors, &mat0, &mat1, &mat2)? else {
+            // debug!("Keypoints not found, skipping circle detection");
+            return Ok((img_out2, None));
+        };
+
+        if let Ok(keypoint) = detectors.keypoints.get(0) {
+            let (x, y, radius) = if settings.prescale > 1.0 {
+                let x = keypoint.pt().x / settings.prescale as f32;
+                let y = keypoint.pt().y / settings.prescale as f32;
+                let radius = keypoint.size() / 2.0 / settings.prescale as f32;
+                (x, y, radius)
+            } else {
+                let x = keypoint.pt().x;
+                let y = keypoint.pt().y;
+                let radius = keypoint.size() / 2.0;
+                (x, y, radius)
+            };
+
+            best_circle = Some((x as f64, y as f64, radius as f64));
+
+            if settings.draw_circle {
+                let mut img_color = Mat::new_rows_cols_with_default(
+                    img_out2.rows(),
+                    img_out2.cols(),
+                    opencv::core::CV_8UC3,
+                    0.0f64.into(),
+                )?;
+
+                if img_out2.data_bytes().unwrap().len() != img0.len() {
+                    cvt_color(
+                        &img_out2,
+                        &mut img_color,
+                        // COLOR_BGR2GRAY,
+                        opencv::imgproc::COLOR_GRAY2RGB,
+                        0,
+                        opencv::core::AlgorithmHint::ALGO_HINT_DEFAULT,
+                    )
+                    .unwrap();
+                    // std::mem::swap(&mut img, &mut img2);
+                } else {
+                    img_color = img_out2.clone();
+                }
+
+                let center = opencv::core::Point::new(x as i32, y as i32);
+
+                let radius = radius as i32;
+                // let center = opencv::core::Point::new(322, 241);
+                // let color = opencv::core::Scalar::new(0., 255., 0., 0.);
+                let thickness = 2;
+                opencv::imgproc::circle(&mut img_color, center, radius, color, thickness, 16, 0)?;
+
+                // let center = opencv::core::Point::new(img_color.cols() / 2, img_color.rows() / 2);
+                // let color = opencv::core::Scalar::new(255., 255., 0., 0.);
+                // opencv::imgproc::circle(&mut img_color, center, radius / 2, color, 1, 16, 0)?;
+
+                img_out2 = img_color;
+            }
+
+            // let area = keypoint.size().powi(2) * std::f32::consts::PI;
+            // debug!("area = {:.0}", area);
+        }
+    }
+
+    let mat0 = img_out_pre1;
+
     /// Find keypoints
+    #[cfg(feature = "nope")]
     if settings.use_hough {
         detectors.keypoints.clear();
 
@@ -448,66 +533,62 @@ pub fn locate_nozzle(
         //         );
         //     }
         // }
-
-        if let Ok(keypoint) = detectors.keypoints.get(0) {
-            let (x, y, radius) = if settings.prescale > 1.0 {
-                let x = keypoint.pt().x / settings.prescale as f32;
-                let y = keypoint.pt().y / settings.prescale as f32;
-                let radius = keypoint.size() / 2.0 / settings.prescale as f32;
-                (x, y, radius)
-            } else {
-                let x = keypoint.pt().x;
-                let y = keypoint.pt().y;
-                let radius = keypoint.size() / 2.0;
-                (x, y, radius)
-            };
-
-            best_circle = Some((x as f64, y as f64, radius as f64));
-
-            if settings.draw_circle {
-                let mut img_color = Mat::new_rows_cols_with_default(
-                    img_out2.rows(),
-                    img_out2.cols(),
-                    opencv::core::CV_8UC3,
-                    0.0f64.into(),
-                )?;
-
-                if img_out2.data_bytes().unwrap().len() != img0.len() {
-                    cvt_color(
-                        &img_out2,
-                        &mut img_color,
-                        // COLOR_BGR2GRAY,
-                        opencv::imgproc::COLOR_GRAY2RGB,
-                        0,
-                        opencv::core::AlgorithmHint::ALGO_HINT_DEFAULT,
-                    )
-                    .unwrap();
-                    // std::mem::swap(&mut img, &mut img2);
-                } else {
-                    img_color = img_out2.clone();
-                }
-
-                let center = opencv::core::Point::new(x as i32, y as i32);
-
-                let radius = radius as i32;
-                // let center = opencv::core::Point::new(322, 241);
-                // let color = opencv::core::Scalar::new(0., 255., 0., 0.);
-                let thickness = 2;
-                opencv::imgproc::circle(&mut img_color, center, radius, color, thickness, 16, 0)?;
-
-                // let center = opencv::core::Point::new(img_color.cols() / 2, img_color.rows() / 2);
-                // let color = opencv::core::Scalar::new(255., 255., 0., 0.);
-                // opencv::imgproc::circle(&mut img_color, center, radius / 2, color, 1, 16, 0)?;
-
-                img_out2 = img_color;
-            }
-
-            // let area = keypoint.size().powi(2) * std::f32::consts::PI;
-            // debug!("area = {:.0}", area);
-        }
     }
 
     Ok((img_out2, best_circle))
+}
+
+fn locate_keypoints(
+    settings: &VisionSettings,
+    detectors: &mut BlobDetectors,
+    mat_binary: &Mat,
+    mat_triangle: &Mat,
+    mat_otsu: &Mat,
+) -> Result<Option<opencv::core::Scalar>> {
+    detectors.keypoints.clear();
+
+    let colors = [
+        opencv::core::Scalar::new(0., 255., 0., 0.),   // green
+        opencv::core::Scalar::new(255., 255., 0., 0.), // yellow
+        opencv::core::Scalar::new(0., 0., 255., 0.),   // red
+        opencv::core::Scalar::new(255., 0., 0., 0.),   // blue
+    ];
+    // let mut color = None;
+
+    /// Combo 1: preprocess 0 (binary + triangle) + standard
+    detectors.standard.detect(
+        &mat_triangle,
+        &mut detectors.keypoints,
+        &opencv::core::no_array(),
+    )?;
+    if detectors.keypoints.len() > 0 {
+        // debug!("Combo 1: found {} keypoints", detectors.keypoints.len());
+        return Ok(Some(colors[0]));
+    }
+
+    /// Combo 2: preprocess 1 (binary + otso) + standard
+    detectors.standard.detect(
+        &mat_otsu,
+        &mut detectors.keypoints,
+        &opencv::core::no_array(),
+    )?;
+    if detectors.keypoints.len() > 0 {
+        // debug!("Combo 2: found {} keypoints", detectors.keypoints.len());
+        return Ok(Some(colors[1]));
+    }
+
+    detectors.standard.detect(
+        &mat_binary,
+        &mut detectors.keypoints,
+        &opencv::core::no_array(),
+    )?;
+    if detectors.keypoints.len() > 0 {
+        // debug!("Combo 3: found {} keypoints", detectors.keypoints.len());
+        return Ok(Some(colors[2]));
+    }
+
+    // unimplemented!()
+    Ok(None)
 }
 
 pub fn preprocess_0(
@@ -599,7 +680,7 @@ pub fn preprocess_0(
         //     opencv::imgproc::THRESH_BINARY_INV,
         // )?;
 
-        let thresh_type = settings.threshold_type;
+        // let thresh_type = settings.threshold_type;
 
         let t = match thresh_type {
             0 => opencv::imgproc::THRESH_BINARY_INV,

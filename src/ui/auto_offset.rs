@@ -205,10 +205,10 @@ pub enum AutoOffsetType {
 
 impl App {
     pub fn auto_offset(&mut self, ui: &mut egui::Ui) {
-        self._auto_offset(ui);
+        self._auto_offset_ui(ui);
     }
 
-    fn _auto_offset(&mut self, ui: &mut egui::Ui) {
+    fn _auto_offset_ui(&mut self, ui: &mut egui::Ui) {
         let Some(pos) = self.get_position() else {
             ui.label("No position data available");
             return;
@@ -250,7 +250,7 @@ impl App {
         egui_extras::TableBuilder::new(ui)
             .id_salt("Running Average Table")
             .column(Column::exact(100.))
-            .columns(Column::exact(80.), 4)
+            .columns(Column::exact(80.), 5)
             .striped(true)
             .header(20., |mut row| {
                 row.col(|ui| {});
@@ -283,6 +283,7 @@ impl App {
                         row.col(|ui| {
                             ui.label(format!("{:.1}", c_r));
                         });
+                        row.col(|ui| {});
                     });
                 }
                 if let Some((x, y, r)) = guess {
@@ -301,6 +302,9 @@ impl App {
                         });
                         row.col(|ui| {
                             ui.label(format!("{:.1}", r));
+                        });
+                        row.col(|ui| {
+                            ui.label(format!("{:.0}", std::f64::consts::PI * r * r));
                         });
                     });
                 }

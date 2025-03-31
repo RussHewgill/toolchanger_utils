@@ -13,7 +13,7 @@ use tracing::{debug, error, info, trace, warn};
 use egui::{Button, Color32, Label, RichText, Vec2};
 use egui_extras::StripBuilder;
 
-use crate::vision::VisionSettings;
+use crate::vision::{VisionSettings, WebcamMessage};
 
 /// New
 impl App {
@@ -174,96 +174,23 @@ impl App {
             //
         });
 
-        /// Auto Offset
-        #[cfg(feature = "nope")]
-        ui.horizontal(|ui| {
-            let button = egui::Button::new(RichText::new("Locate Single Nozzle").size(16.));
-            let button = if self
-                .auto_offset
-                .as_ref()
-                .map(|a| a.single_tool() && a.check_repeatability().is_none())
-                .unwrap_or(false)
-            {
-                button.fill(Color32::from_rgb(50, 158, 244))
-            } else {
-                button
-            };
-            if ui.add(button).clicked() {
-                if self.auto_offset.is_none() {
-                    if let Some((x, y, _)) = self.get_position() {
-                        self.auto_offset =
-                            Some(crate::ui::auto_offset::AutoOffset::new((x, y), true));
-                    }
-                } else {
-                    self.auto_offset = None;
-                }
-            }
-
-            let button = egui::Button::new(RichText::new("Locate All Nozzles").size(16.));
-            let button = if self
-                .auto_offset
-                .as_ref()
-                .map(|a| !a.single_tool())
-                .unwrap_or(false)
-            {
-                button.fill(Color32::from_rgb(50, 158, 244))
-            } else {
-                button
-            };
-            if ui.add(button).clicked() {
-                if self.auto_offset.is_none() {
-                    if let Some((x, y, _)) = self.get_position() {
-                        self.auto_offset =
-                            Some(crate::ui::auto_offset::AutoOffset::new((x, y), false));
-                    }
-                } else {
-                    self.auto_offset = None;
-                }
-            }
-
-            let button = egui::Button::new(RichText::new("Repeatability Test").size(16.));
-            let button = if matches!(
-                self.auto_offset.auto_offset_type(),
-                crate::ui::auto_offset::AutoOffsetType::RepeatabilityTest
-            ) {
-                button.fill(Color32::from_rgb(50, 158, 244))
-            } else {
-                button
-            };
-            if ui.add(button).clicked() {
-                if let Some((x, y, _)) = self.get_position() {
-                    if let Some(t) = self.active_tool {
-                        debug!("Starting repeatability test");
-
-                        self.auto_offset.start_repeatability();
-
-                        // self.auto_offset =
-                        //     Some(crate::ui::auto_offset::AutoOffset::new_check_repeatability(
-                        //         (x, y),
-                        //         t as i32,
-                        //         3,
-                        //     ));
-                    }
-                }
-            }
-        });
         ui.separator();
 
-        /// screenshot
-        ui.horizontal(|ui| {
-            if ui
-                .button(RichText::new("Save Screenshot").size(16.))
-                .clicked()
-            {
-                // self.save_screenshot();
-                let _ = self
-                    .channel_to_vision
-                    .as_mut()
-                    .unwrap()
-                    .try_send(crate::vision::WebcamCommand::SaveScreenshot(None));
-            }
-        });
-        ui.separator();
+        // /// screenshot
+        // ui.horizontal(|ui| {
+        //     if ui
+        //         .button(RichText::new("Save Screenshot").size(16.))
+        //         .clicked()
+        //     {
+        //         // self.save_screenshot();
+        //         let _ = self
+        //             .channel_to_vision
+        //             .as_mut()
+        //             .unwrap()
+        //             .try_send(crate::vision::WebcamCommand::SaveScreenshot(None));
+        //     }
+        // });
+        // ui.separator();
 
         /// home
         ui.horizontal(|ui| {
@@ -381,6 +308,7 @@ impl App {
         ui.separator();
 
         /// Test positions
+        #[cfg(feature = "nope")]
         ui.horizontal(|ui| {
             #[cfg(feature = "nope")]
             let test_positions = [
@@ -414,70 +342,196 @@ impl App {
                 self.move_relative((x, x), true);
             }
         });
+        #[cfg(feature = "nope")]
         ui.separator();
-
-        let steps = [0.01, 0.1, 0.5, 1., 5.];
 
         let Some((x, y, z)) = self.get_position() else {
             ui.label("No position");
             return;
         };
 
-        let button_width = 50.;
-
-        StripBuilder::new(ui)
-            .sizes(egui_extras::Size::exact(100.), 2)
-            .vertical(|mut strip| {
-                strip.strip(|builder| {
-                    builder
-                        // .sizes(egui_extras::Size::relative(0.1), steps.len())
-                        .sizes(egui_extras::Size::exact(button_width), steps.len())
-                        .size(egui_extras::Size::exact(100.))
-                        .sizes(egui_extras::Size::exact(button_width), steps.len())
-                        // .sizes(egui_extras::Size::relative(0.1), steps.len())
-                        .cell_layout(egui::Layout::default().with_cross_align(egui::Align::Center))
-                        .horizontal(|mut strip| {
-                            let mut strip = self.button_range(strip, Axis::X, &steps, true);
-
-                            strip.cell(|ui| {
-                                ui.label(RichText::new(format!("X: {:.2}", x)).size(20.));
-                            });
-
-                            let mut strip = self.button_range(strip, Axis::X, &steps, false);
+        // egui::ScrollArea::neither()
+        // .max_height(100.)
+        #[cfg(feature = "nope")]
+        egui::Frame::group(ui.style())
+            // .max_width()
+            .show(ui, |ui| {
+                ui.set_height(100.);
+                StripBuilder::new(ui)
+                    .sizes(egui_extras::Size::exact(50.), 2)
+                    // .sizes(egui_extras::Size::relative(0.5), 2)
+                    .vertical(|mut strip| {
+                        strip.strip(|builder| {
+                            self.movement_buttons(builder, Axis::X, (x, y, z));
                         });
-                });
-
-                strip.strip(|builder| {
-                    builder
-                        // .sizes(egui_extras::Size::relative(0.1), steps.len())
-                        .sizes(egui_extras::Size::exact(button_width), steps.len())
-                        .size(egui_extras::Size::exact(100.))
-                        // .sizes(egui_extras::Size::relative(0.1), steps.len())
-                        .sizes(egui_extras::Size::exact(button_width), steps.len())
-                        .cell_layout(egui::Layout::default().with_cross_align(egui::Align::Center))
-                        .horizontal(|mut strip| {
-                            let mut strip = self.button_range(strip, Axis::Y, &steps, true);
-
-                            strip.cell(|ui| {
-                                ui.label(RichText::new(format!("Y: {:.2}", y)).size(20.));
-                            });
-
-                            let mut strip = self.button_range(strip, Axis::Y, &steps, false);
+                        strip.strip(|builder| {
+                            self.movement_buttons(builder, Axis::Y, (x, y, z));
                         });
-                });
+                    });
             });
 
-        // ui.horizontal(|ui| {
-        //     if let Some(pos) = klipper.get_position() {
-        //         ui.label(format!("X: {:.3}", pos.0));
-        //         ui.label(format!("Y: {:.3}", pos.1));
-        //         ui.label(format!("Z: {:.3}", pos.2));
-        //     } else {
-        //         ui.label("No position");
-        //     }
-        // });
+        #[cfg(feature = "nope")]
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            StripBuilder::new(ui)
+                .sizes(egui_extras::Size::exact(100.), 2)
+                .vertical(|mut strip| {
+                    strip.strip(|builder| {
+                        self.movement_buttons(builder, Axis::X, (x, y, z));
+                    });
+                    strip.strip(|builder| {
+                        self.movement_buttons(builder, Axis::Y, (x, y, z));
+                    });
+                });
+        });
 
         //
+    }
+
+    fn movement_controls(&mut self, ui: &mut egui::Ui) {
+        let Some((x, y, z)) = self.get_position() else {
+            ui.label("No position");
+            return;
+        };
+
+        ui.horizontal(|ui| {
+            self.position_labels(ui);
+        });
+
+        ui.group(|ui| {
+            ui.set_height(100.);
+
+            StripBuilder::new(ui)
+                .sizes(egui_extras::Size::relative(0.5), 2)
+                .vertical(|mut strip| {
+                    strip.strip(|builder| {
+                        self.movement_buttons(builder, Axis::X, (x, y, z));
+                    });
+                    strip.strip(|builder| {
+                        self.movement_buttons(builder, Axis::Y, (x, y, z));
+                    });
+                });
+        });
+    }
+
+    fn position_labels(&mut self, ui: &mut egui::Ui) {
+        let Some((x, y, z)) = self.get_position() else {
+            ui.label("No position");
+            return;
+        };
+
+        fn label(ui: &mut egui::Ui, (x, y, z): (f64, f64, f64), axis: Axis) {
+            let pos = match axis {
+                Axis::X => x,
+                Axis::Y => y,
+                Axis::Z => z,
+            };
+            // let text = format!("{}: {:.4}", axis.to_str().to_uppercase(), pos);
+            // ui.label(RichText::new(text).size(18.0).strong());
+
+            ui.group(|ui| {
+                ui.set_width(100.);
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(format!("{}: ", axis.to_str().to_uppercase()))
+                            .size(18.)
+                            .strong(),
+                    );
+
+                    let layout = egui::Layout::right_to_left(egui::Align::Center);
+
+                    ui.with_layout(layout, |ui| {
+                        ui.label(RichText::new(format!("{:.4}", pos)).strong().size(18.));
+                    });
+                    // let mut s =
+                    // ui.add(
+                    //     egui::TextEdit::singleline(&mut s)
+                    //         .interactive(false)
+                    //         .horizontal_align(egui::Align::Max),
+                    // );
+                });
+            });
+        }
+
+        StripBuilder::new(ui)
+            .sizes(egui_extras::Size::exact(100.), 3)
+            .horizontal(|mut strip| {
+                strip.cell(|ui| {
+                    label(ui, (x, y, z), Axis::X);
+                });
+                strip.cell(|ui| {
+                    label(ui, (x, y, z), Axis::Y);
+                });
+                strip.cell(|ui| {
+                    label(ui, (x, y, z), Axis::Z);
+                });
+            });
+    }
+
+    // #[cfg(feature = "nope")]
+    fn movement_buttons<'a>(
+        &mut self,
+        builder: egui_extras::StripBuilder<'a>,
+        axis: Axis,
+        (x, y, z): (f64, f64, f64),
+    ) {
+        let steps = [0.01, 0.1, 0.5, 1., 5.];
+        // let steps = [0.01, 0.1, 5., 10., 15.];
+        let button_width = 50.;
+
+        let pos = match axis {
+            Axis::X => x,
+            Axis::Y => y,
+            Axis::Z => z,
+        };
+
+        builder
+            .sizes(egui_extras::Size::exact(button_width), steps.len())
+            // .size(egui_extras::Size::exact(100.))
+            .size(egui_extras::Size::exact(50.))
+            // .sizes(egui_extras::Size::relative(0.1), steps.len())
+            .sizes(egui_extras::Size::exact(button_width), steps.len())
+            .cell_layout(egui::Layout::default().with_cross_align(egui::Align::Center))
+            .horizontal(|mut strip| {
+                let mut strip = self.button_range(strip, axis, &steps, true);
+
+                strip.cell(|ui| {
+                    let layout = egui::Layout::default()
+                        .with_cross_align(egui::Align::Center)
+                        .with_main_justify(true);
+
+                    let text = format!("{}: {:.4}", axis.to_str(), pos);
+
+                    // ui.set_width(100.);
+                    // ui.set_height(40.);
+
+                    let text = axis.to_str().to_uppercase();
+                    let button = egui::Button::new(RichText::new(&text).size(16.0).strong())
+                        .fill(Color32::RED)
+                        .min_size(egui::vec2(60., 40.));
+
+                    ui.add(button);
+
+                    // ui.with_layout(layout, |ui| {
+                    //     //
+                    // });
+
+                    // egui::Frame::NONE
+                    //     .fill(Color32::RED)
+                    //     .corner_radius(3.)
+                    //     // .fill(Color32::RED)
+                    //     .show(ui, |ui| {
+                    //         ui.with_layout(layout, |ui| {
+                    //             ui.label(
+                    //                 RichText::new(format!("{}: {:.2}", axis.to_str(), pos))
+                    //                     .size(20.)
+                    //                     .strong(),
+                    //             );
+                    //         });
+                    //     });
+                });
+
+                let mut strip = self.button_range(strip, axis, &steps, false);
+            });
     }
 
     fn button_range<'a, 'b>(
@@ -495,11 +549,13 @@ impl App {
             };
             strip.cell(|ui| {
                 let text = if neg {
-                    format!("{:.2}", -step)
+                    // format!("{:.2}", -step)
+                    format!("{}", -step)
                 } else {
-                    format!("+{:.2}", step)
+                    // format!("+{:.2}", step)
+                    format!("+{}", step)
                 };
-                let button = egui::Button::new(RichText::new(text).size(16.0))
+                let button = egui::Button::new(RichText::new(text).size(16.0).strong())
                     .fill(egui::Color32::from_rgb(50, 158, 244))
                     .min_size(egui::vec2(60., 40.));
 
@@ -508,7 +564,7 @@ impl App {
                 // let button = ui.with_layout(layout, |ui| ui.add(button));
 
                 if ui.add(button).clicked() {
-                    eprintln!("Clicked on X: {}", -step);
+                    // eprintln!("Clicked on X: {}", -step);
 
                     let step = if neg { -step } else { step };
                     self.move_axis_relative(axis, step, true);
@@ -898,16 +954,21 @@ impl eframe::App for App {
         if let Some(rx) = self.channel_to_ui.as_mut() {
             while let Ok(msg) = rx.try_recv() {
                 match msg {
-                    crate::vision::WebcamMessage::FoundNozzle(pos) => {
+                    WebcamMessage::FoundNozzle(pos) => {
                         // debug!("Found nozzle: {:?}", pos);
                         // self.running_average.push_position((pos.0, pos.1));
                         self.running_average.add_frame(Some(pos));
                         // self.current_located_nozzle = Some(pos);
                     }
-                    crate::vision::WebcamMessage::NozzleNotFound => {
+                    WebcamMessage::NozzleNotFound => {
                         // debug!("Nozzle not found");
                         self.running_average.add_frame(None);
                         // self.current_located_nozzle = None;
+                    }
+                    WebcamMessage::CameraFormats(camera_formats) => {
+                        debug!("Got camera formats: {:?}", camera_formats.len());
+                        self.camera_formats = camera_formats;
+                        //
                     }
                 }
             }
@@ -972,15 +1033,33 @@ impl eframe::App for App {
                         self.auto_offset(ui);
                     });
 
+                egui::TopBottomPanel::bottom("program controls")
+                    .resizable(false)
+                    .default_height(600.)
+                    .show(ctx, |ui| {
+                        // self.movement_controls(ui);
+
+                        ui.vertical_centered(|ui| {
+                            self.controls(ui);
+                        });
+                    });
+
+                egui::TopBottomPanel::bottom("motion controls")
+                    .resizable(false)
+                    .default_height(600.)
+                    .show(ctx, |ui| {
+                        self.movement_controls(ui);
+                    });
+
                 egui::CentralPanel::default().show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
                         self.webcam(ui);
                     });
                     ui.separator();
 
-                    ui.vertical_centered(|ui| {
-                        self.controls(ui);
-                    });
+                    // ui.vertical_centered(|ui| {
+                    //     self.controls(ui);
+                    // });
 
                     //
                 });

@@ -117,20 +117,47 @@ impl KlipperProtocol {
         let x = pos.0;
         let y = pos.1;
 
+        debug!("Moving to {} {}", x, y);
+
         if let Some(bounce_amount) = bounce {
-            let gcode = format!("G1 X{} Y{}", x - bounce_amount, y - bounce_amount);
-            debug!("Running gcode 0: {}", gcode);
+            // let bounce_amount = 5.;
+
+            let Ok((x0, y0, _)) = self.fetch_position() else {
+                bail!("Failed to get position");
+            };
+
+            let x2 = if x0 >= x {
+                x - bounce_amount
+            } else {
+                x + bounce_amount
+            };
+            let y2 = if y0 >= y {
+                y - bounce_amount
+            } else {
+                y + bounce_amount
+            };
+
+            // let gcode = format!("G1 X{} Y{}", x - bounce_amount, y - bounce_amount);
+
+            let gcode = format!("G1 X{} Y{}", x2, y2);
+            // debug!("Running gcode 0: {}", gcode);
             self.run_gcode(&gcode)?;
         }
 
         let gcode = format!("G1 X{} Y{}", x, y);
-        debug!("Running gcode 1: {}", gcode);
+        // debug!("Running gcode 1: {}", gcode);
         self.run_gcode(&gcode)?;
 
         Ok(())
     }
 
-    pub fn move_axis_relative(&mut self, axis: Axis, amount: f64, bounce: bool) -> Result<()> {
+    // #[cfg(feature = "nope")]
+    pub fn move_axis_relative(
+        &mut self,
+        axis: Axis,
+        amount: f64,
+        bounce: Option<f64>,
+    ) -> Result<()> {
         let axis = match axis {
             Axis::X => "X",
             Axis::Y => "Y",
@@ -140,32 +167,27 @@ impl KlipperProtocol {
 
         debug!("Moving axis {} by {}", axis, amount);
 
-        if bounce {
-            let bounce_amount = 0.5;
-
-            // let (m0, m1) = if amount > 0.0 {
-            //     (-bounce_amount, bounce_amount + amount)
-            // } else {
-            //     (bounce_amount, amount - bounce_amount)
-            // };
-
-            let (m0, m1) = if amount > 0.0 {
-                (-bounce_amount, bounce_amount + amount)
-            } else {
-                (-bounce_amount, bounce_amount + amount)
+        if let Some(bounce_amount) = bounce {
+            let Some((x0, y0, _)) = self.get_position()? else {
+                bail!("Failed to get position");
             };
 
-            // let m0 = -amount.signum() * bounce_amount;
-            // let m1 = -amount.signum() * (amount - bounce_amount * amount.signum());
+            // let bounce_amount = 5.;
 
-            debug!("m0 = {}", m0);
-            debug!("m1 = {}", m1);
+            let (m0, m1) = if amount > 0.0 {
+                (amount + bounce_amount, -bounce_amount)
+            } else {
+                (amount - bounce_amount, bounce_amount)
+            };
+
+            // debug!("Moving axis {} by {} and {}", axis, m0, m1);
 
             self.run_gcode(&format!("_CLIENT_LINEAR_MOVE {}={}", axis, m0))?;
             self.run_gcode(&format!("_CLIENT_LINEAR_MOVE {}={}", axis, m1))?;
         } else {
             self.run_gcode(&format!("_CLIENT_LINEAR_MOVE {}={}", axis, amount))?;
         }
+
         Ok(())
     }
 
@@ -257,6 +279,9 @@ impl KlipperProtocol {
 
     // fn run_gcode(&mut self, gcode: &str) -> Result<()> {
     pub fn run_gcode(&mut self, gcode: &str) -> Result<()> {
+        /// ensure that all moves are absolute
+        let gcode = format!("G90\n{}", gcode);
+
         let mut map = HashMap::new();
         map.insert("script", gcode);
 
