@@ -808,7 +808,8 @@ impl App {
                     rx_to_vision,
                     tx_to_ui,
                     self.webcam_settings_mutex.clone(),
-                    self.options.camera_size,
+                    // self.options.camera_size,
+                    self.selected_camera_format,
                 );
 
                 &self.webcam_texture.as_ref().unwrap()
@@ -966,10 +967,21 @@ impl eframe::App for App {
                         // self.current_located_nozzle = None;
                     }
                     WebcamMessage::CameraFormats(camera_formats) => {
-                        debug!("Got camera formats: {:?}", camera_formats.len());
+                        // debug!("Got camera formats: {:?}", camera_formats.len());
                         self.camera_formats = camera_formats;
                         //
                     }
+                }
+            }
+        }
+
+        if self.camera_formats.len() == 0 && !self.camera_formats_request_sent {
+            if let Some(tx) = self.channel_to_vision.as_ref() {
+                if let Err(e) = tx.try_send(crate::vision::WebcamCommand::GetCameraFormats) {
+                    error!("Failed to send camera formats command: {}", e);
+                } else {
+                    debug!("Sent get camera formats command");
+                    self.camera_formats_request_sent = true;
                 }
             }
         }

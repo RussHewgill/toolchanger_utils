@@ -29,82 +29,117 @@ pub fn spawn_locator_thread(
     ctx: egui::Context,
     mut handle: egui::TextureHandle,
     index: usize,
-    mut channel_from_ui: crossbeam_channel::Receiver<WebcamCommand>,
+    channel_from_ui: crossbeam_channel::Receiver<WebcamCommand>,
     channel_to_ui: crossbeam_channel::Sender<WebcamMessage>,
     webcam_settings_mutex: Arc<Mutex<crate::vision::VisionSettings>>,
-    camera_size: (f64, f64),
+    // camera_size: (f64, f64),
+    mut format: Option<CameraFormat>,
 ) {
     std::thread::spawn(move || loop {
-        if let Err(e) = _spawn_locator_thread(
-            ctx.clone(),
-            handle.clone(),
-            index,
-            channel_from_ui.clone(),
-            channel_to_ui.clone(),
-            webcam_settings_mutex.clone(),
-            camera_size,
-        ) {
-            debug!("Failed to spawn camera thread: {}", e);
-
-            while let Ok(cmd) = channel_from_ui.try_recv() {
-                match cmd {
-                    WebcamCommand::SaveScreenshot(_) => todo!(),
-                    WebcamCommand::SetCameraControl(camera_control) => todo!(),
-                    WebcamCommand::GetCameraFormats => {
-                        debug!("Getting camera formats");
-                        let format = RequestedFormat::new::<RgbFormat>(
-                            RequestedFormatType::AbsoluteHighestFrameRate,
-                        );
-
-                        let mut camera = nokhwa::Camera::new(
-                            nokhwa::utils::CameraIndex::Index(index as u32),
-                            format,
-                        )
-                        .unwrap();
-
-                        let mut formats = vec![];
-                        for f in camera.compatible_camera_formats().unwrap() {
-                            // debug!("Compatible format: {:?}", f);
-                            formats.push(crate::vision::vision_types::CameraFormat::new(f));
-                        }
-                        if channel_to_ui
-                            .send(WebcamMessage::CameraFormats(formats))
-                            .is_err()
-                        {
-                            debug!("Failed to send formats message to UI");
-                        }
-                        //
+        debug!("Camera supervisor thread running");
+        while let Ok(cmd) = channel_from_ui.try_recv() {
+            match cmd {
+                WebcamCommand::SaveScreenshot(_) => {}
+                WebcamCommand::SetCameraControl(camera_control) => {}
+                WebcamCommand::GetCameraFormats => {
+                    if let Err(e) = get_camera_formats(index, &channel_to_ui) {
+                        debug!("Failed to get camera formats: {}", e);
                     }
                 }
+                WebcamCommand::SetCameraFormat(f) => {
+                    debug!("Setting camera format: {:?}", f);
+                    format = Some(f);
+                }
             }
-
-            std::thread::sleep(std::time::Duration::from_secs(1));
         }
+
+        debug!("Spawning camera thread, format = {:?}", format);
+        // #[cfg(feature = "nope")]
+        if let Some(format) = format {
+            if let Err(e) = _spawn_camera_thread(
+                ctx.clone(),
+                handle.clone(),
+                index,
+                &channel_from_ui,
+                &channel_to_ui,
+                webcam_settings_mutex.clone(),
+                // camera_size,
+                format,
+            ) {
+                debug!("Failed to spawn camera thread: {}", e);
+            }
+        }
+
+        // debug!("Looping");
+        std::thread::sleep(std::time::Duration::from_millis(50));
     });
 }
 
-fn _spawn_locator_thread(
-    ctx: egui::Context,
-    mut handle: egui::TextureHandle,
+fn get_camera_formats(
     index: usize,
-    mut channel_from_ui: crossbeam_channel::Receiver<WebcamCommand>,
-    channel_to_ui: crossbeam_channel::Sender<WebcamMessage>,
-    webcam_settings_mutex: Arc<Mutex<crate::vision::VisionSettings>>,
-    camera_size: (f64, f64),
+    channel_to_ui: &crossbeam_channel::Sender<WebcamMessage>,
 ) -> Result<()> {
+    // debug!("Getting camera formats");
     let format = RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
 
     let mut camera =
         nokhwa::Camera::new(nokhwa::utils::CameraIndex::Index(index as u32), format).unwrap();
 
+    let mut formats = std::collections::HashSet::new();
+    for f in camera.compatible_camera_formats().unwrap() {
+        // debug!("Compatible format: {:?}", f);
+        if f.format() == nokhwa::utils::FrameFormat::MJPEG {
+            // debug!("Compatible format: {:?}", f);
+            formats.insert(crate::vision::vision_types::CameraFormat::new(f));
+        }
+    }
+    let mut formats: Vec<_> = formats.iter().cloned().collect();
+    formats.sort_by_key(|f| f.size.0);
+    formats.sort_by_key(|f| f.framerate);
+    if channel_to_ui
+        .send(WebcamMessage::CameraFormats(formats))
+        .is_err()
+    {
+        debug!("Failed to send formats message to UI");
+    }
+    Ok(())
+}
+
+fn _spawn_camera_thread(
+    ctx: egui::Context,
+    mut handle: egui::TextureHandle,
+    index: usize,
+    channel_from_ui: &crossbeam_channel::Receiver<WebcamCommand>,
+    channel_to_ui: &crossbeam_channel::Sender<WebcamMessage>,
+    webcam_settings_mutex: Arc<Mutex<crate::vision::VisionSettings>>,
+    // camera_size: (f64, f64),
+    set_format: CameraFormat,
+) -> Result<()> {
+    let _format = RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
+
+    let mut camera =
+        nokhwa::Camera::new(nokhwa::utils::CameraIndex::Index(index as u32), _format).unwrap();
+
     // for f in camera.compatible_camera_formats().unwrap() {
     //     debug!("Compatible format: {:?}", f);
     // }
 
+    // let format = nokhwa::utils::CameraFormat::new(
+    //     // nokhwa::utils::Resolution::new(Webcam::SIZE.0, Webcam::SIZE.1),
+    //     nokhwa::utils::Resolution::new(camera_size.0 as u32, camera_size.1 as u32),
+    //     nokhwa::utils::FrameFormat::MJPEG,
+    //     30,
+    // );
+
     let format = nokhwa::utils::CameraFormat::new(
         // nokhwa::utils::Resolution::new(Webcam::SIZE.0, Webcam::SIZE.1),
-        nokhwa::utils::Resolution::new(camera_size.0 as u32, camera_size.1 as u32),
-        nokhwa::utils::FrameFormat::MJPEG,
+        // nokhwa::utils::Resolution::new(camera_size.0 as u32, camera_size.1 as u32),
+        nokhwa::utils::Resolution::new(set_format.size.0, set_format.size.1),
+        // nokhwa::utils::FrameFormat::MJPEG,
+        match set_format.format {
+            0 => nokhwa::utils::FrameFormat::MJPEG,
+            _ => bail!("Unknown format type: {:?}", set_format.to_string()),
+        },
         30,
     );
 
@@ -134,7 +169,8 @@ fn _spawn_locator_thread(
 
     let mut buffer: image::ImageBuffer<image::Rgb<u8>, Vec<u8>> =
             // image::ImageBuffer::new(camera_size.0 as u32, camera_size.1 as u32);
-            image::ImageBuffer::new(camera_size.0 as u32, camera_size.1 as u32);
+            // image::ImageBuffer::new(camera_size.0 as u32, camera_size.1 as u32);
+            image::ImageBuffer::new(set_format.size.0 as u32, set_format.size.1 as u32);
 
     // let mut buffer = image::DynamicImage::from(buffer);
 
@@ -185,17 +221,13 @@ fn _spawn_locator_thread(
                     camera.set_camera_control(c.0, c.1).unwrap();
                 }
                 WebcamCommand::GetCameraFormats => {
-                    let mut formats = vec![];
-                    for f in camera.compatible_camera_formats().unwrap() {
-                        // debug!("Compatible format: {:?}", f);
-                        formats.push(crate::vision::vision_types::CameraFormat::new(f));
+                    if let Err(e) = get_camera_formats(index, channel_to_ui) {
+                        debug!("Failed to get camera formats: {}", e);
                     }
-                    if channel_to_ui
-                        .send(WebcamMessage::CameraFormats(formats))
-                        .is_err()
-                    {
-                        debug!("Failed to send formats message to UI");
-                    }
+                }
+                WebcamCommand::SetCameraFormat(f) => {
+                    // debug!("Can't set camera formats here");
+                    bail!("Restarting vision thread to change format");
                 }
             }
         }

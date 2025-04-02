@@ -36,7 +36,7 @@ pub struct App {
     pub current_tab: Tab,
 
     #[serde(skip)]
-    pub webcam_settings_prev: crate::vision::VisionSettings,
+    pub vision_settings_prev: crate::vision::VisionSettings,
 
     pub vision_settings: crate::vision::VisionSettings,
 
@@ -75,6 +75,8 @@ pub struct App {
     #[serde(skip)]
     pub camera_formats: Vec<crate::vision::vision_types::CameraFormat>,
     #[serde(skip)]
+    pub camera_formats_request_sent: bool,
+    // #[serde(skip)]
     pub selected_camera_format: Option<crate::vision::CameraFormat>,
 }
 

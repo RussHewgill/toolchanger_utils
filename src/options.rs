@@ -48,7 +48,8 @@ impl App {
         ui.separator();
 
         ui.horizontal(|ui| {
-            egui::ComboBox::new("Camera Format", "Camera Format")
+            let prev_format = self.selected_camera_format;
+            let resp = egui::ComboBox::new("Camera Format", "Camera Format")
                 // .selected_text(self.selected_camera_format.as_ref().map_or("None".to_string(), |f| f))
                 .show_ui(ui, |ui| {
                     if self.camera_formats.len() == 0 {
@@ -74,6 +75,24 @@ impl App {
                     // ui.selectable_value(&mut self.options.camera_size, (1920., 1080.), "1920x1080");
                     // ui.selectable_value(&mut self.options.camera_size, (3840., 2160.), "3840x2160");
                 });
+
+            if prev_format != self.selected_camera_format {
+                if let Some(format) = self.selected_camera_format {
+                    debug!("New camera format: {:?}", self.selected_camera_format);
+
+                    if let Some(tx) = self.channel_to_vision.as_ref() {
+                        if let Err(e) =
+                            tx.send(crate::vision::WebcamCommand::SetCameraFormat(format))
+                        {
+                            error!("Failed to send command to webcam thread: {}", e);
+                        } else {
+                            self.options.camera_size = (format.size.0 as f64, format.size.1 as f64);
+                        }
+                    } else {
+                        error!("No channel to webcam thread");
+                    }
+                }
+            }
         });
     }
 }

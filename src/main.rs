@@ -9,6 +9,7 @@
 // #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 pub mod appconfig;
+pub mod klipper_async;
 pub mod klipper_protocol;
 pub mod logging;
 pub mod options;
@@ -41,36 +42,55 @@ fn main() -> opencv::Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "nope")]
-fn main() -> Result<()> {
-    logging::init_logs();
+/// Async klipper tests
+// #[cfg(feature = "nope")]
+#[tokio::main]
+async fn main() -> Result<()> {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio::io::AsyncBufReadExt;
+    use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
-    let mut avg = vision::running_average::CircleAggregator::default();
+    // let url = url::Url::parse("ws://192.168.0.245:7125/klippysocket")?;
+    // let url = "ws://192.168.0.245:7125/klippysocket";
+    let url = "ws://192.168.0.245:7125/websocket";
 
-    let p = (50., 50., 10.);
+    let (ws_stream, _) = connect_async(url).await?;
+    println!("Connected to {}", url);
 
-    for _ in 0..50 {
-        avg.add_frame(Some(p));
+    // Split the WebSocket stream into write and read halves
+    let (mut write, mut read) = ws_stream.split();
+
+    let msg = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "printer.objects.subscribe",
+        "params": {
+            "objects": {
+                "gcode_move": null,
+                "toolhead": ["position", "status"]
+            }
+        },
+        "id": 1
+    })
+    .to_string();
+
+    if let Err(e) = write.send(Message::Text(msg.into())).await {
+        eprintln!("Error sending message: {}", e);
     }
-    for i in 0..0 {
-        avg.add_frame(None);
-        if let Some((confidence, (c_x, c_y, c_r))) = avg.confidence() {
-            eprintln!(
-                "Confidence[{}]: {:.3}, ({:.4}, {:.4}, r = {:.1})",
-                i, confidence, c_x, c_y, c_r
-            );
-        } else {
-            eprintln!("No confidence");
+
+    // Handle incoming messages
+    while let Some(message) = read.next().await {
+        match message {
+            Ok(Message::Text(text)) => println!("Received: {}\n", text),
+            Ok(Message::Close(_)) => {
+                println!("Connection closed");
+                break;
+            }
+            Err(e) => {
+                eprintln!("Error receiving message: {}", e);
+                break;
+            }
+            _ => {} // Ignore other message types
         }
-    }
-
-    if let Some((confidence, (c_x, c_y, c_r))) = avg.confidence() {
-        eprintln!(
-            "Confidence: {:.3}, ({:.4}, {:.4}, r = {:.1})",
-            confidence, c_x, c_y, c_r
-        );
-    } else {
-        eprintln!("No confidence");
     }
 
     Ok(())
@@ -86,7 +106,7 @@ fn main() -> Result<()> {
 }
 
 /// Main App
-// #[cfg(feature = "nope")]
+#[cfg(feature = "nope")]
 #[cfg(not(feature = "tests"))]
 fn main() -> eframe::Result<()> {
     use ui::ui_types::App;

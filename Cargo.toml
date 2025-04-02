@@ -62,4 +62,10 @@ fast_image_resize = { version = "5.1.2", features = ["image", "rayon"] }
 # enum2egui = "0.3.11"
 # egui-probe = { version = "0.8.0", features = ["derive"] }
 
-# tokio = { version = "1.44.1", features = ["full"] }
+tokio = { version = "1.44.1", features = ["full"] }
+egui_inbox = { version = "0.8.0", features = ["tokio"] }
+tokio-tungstenite = "0.26.2"
+futures-util = { version = "0.3.28", default-features = false, features = [
+    "sink",
+    "std",
+] }

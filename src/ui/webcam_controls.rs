@@ -234,10 +234,10 @@ impl App {
         // self.webcam_camera_controls(ui);
         // ui.end_row();
 
-        if self.vision_settings != self.webcam_settings_prev {
+        if self.vision_settings != self.vision_settings_prev {
             let mut settings = self.webcam_settings_mutex.lock().unwrap();
             *settings = self.vision_settings;
-            self.webcam_settings_prev = self.vision_settings.clone();
+            self.vision_settings_prev = self.vision_settings.clone();
         }
     }
 

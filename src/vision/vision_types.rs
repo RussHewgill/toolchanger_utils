@@ -33,7 +33,7 @@ pub enum WebcamMessage {
     CameraFormats(Vec<CameraFormat>),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct CameraFormat {
     pub size: (u32, u32),
     pub format: u32,
@@ -51,11 +51,11 @@ impl CameraFormat {
 
     pub fn to_string(&self) -> String {
         format!(
-            "{}x{} {}fps, {}",
+            "{: >2} fps, {}x{}",
+            self.framerate,
             self.size.0,
             self.size.1,
-            self.framerate,
-            self.get_format()
+            // self.get_format()
         )
     }
 
