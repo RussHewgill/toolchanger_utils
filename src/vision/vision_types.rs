@@ -408,7 +408,7 @@ impl Default for VisionSettings {
             // rotate: 3,
             preprocess_pipeline: 0,
             target_radius: 27.,
-            prescale: 1.0,
+            prescale: 2.0,
         }
     }
 }

@@ -1015,6 +1015,71 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
 
+        /// Init klipper
+        if !self.klipper_started {
+            debug!("starting klipper thread");
+            let url = url::Url::parse(&format!("{}", self.options.printer_url)).unwrap();
+            let url = url::Url::parse(&format!("ws://{}:7125/websocket", url.host_str().unwrap()))
+                .unwrap();
+
+            // debug!("url = {}", url);
+
+            let sender_pos = self.inbox.sender();
+
+            let (mut tx, rx) = tokio::sync::mpsc::channel(2);
+
+            tx.blocking_send(crate::klipper_async::KlipperCommand::GetToolOffsets)
+                .unwrap_or_else(|e| {
+                    error!("Failed to send command: {}", e);
+                });
+
+            self.klipper_tx = Some(tx);
+
+            let (tx2, mut rx2) = tokio::sync::oneshot::channel();
+
+            std::thread::spawn(move || {
+                // let rt = tokio::runtime::Runtime::new().unwrap();
+                let rt = tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(3)
+                    .enable_all()
+                    .build()
+                    .unwrap();
+
+                rt.block_on(async move {
+                    let mut klipper =
+                        crate::klipper_async::KlipperConn::new(url, sender_pos, rx, tx2)
+                            .await
+                            .unwrap();
+                    klipper.run().await.unwrap();
+                });
+            });
+
+            let status = loop {
+                if let Ok(status) = rx2.try_recv() {
+                    break status;
+                };
+            };
+
+            self.klipper_status = Some(status);
+
+            self.klipper_started = true;
+        }
+
+        self.inbox.set_ctx(ctx);
+        while let Some(msg) = self.inbox.read_without_ctx().next() {
+            match msg {
+                crate::klipper_async::KlipperMessage::Position(pos) => self.last_position = pos,
+                crate::klipper_async::KlipperMessage::AxesHomed((x, y, z)) => todo!(),
+                crate::klipper_async::KlipperMessage::KlipperError(e) => {
+                    error!("Klipper error: {}", e);
+                    self.errors.push(e.to_string());
+                }
+                crate::klipper_async::KlipperMessage::ToolOffsets(offsets) => {
+                    self.tool_offsets = offsets
+                }
+            }
+        }
+
         if let Some(rx) = self.channel_to_ui.as_mut() {
             while let Ok(msg) = rx.try_recv() {
                 match msg {

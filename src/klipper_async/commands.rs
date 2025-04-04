@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, ensure, Context, Result};
+use tokio::time::Instant;
 use tracing::{debug, error, info, trace, warn};
 
 use super::KlipperConn;
@@ -7,59 +8,13 @@ use crate::ui::ui_types::Axis;
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::connect_async;
 
-#[cfg(feature = "nope")]
-impl KlipperConn {
-    pub async fn oneshot(&self) -> Result<()> {
-        let (ws_stream, _) = connect_async(&self.url).await?;
-        // debug!("Connected to {}", &url);
-
-        let (mut ws_write, mut ws_read) = ws_stream.split();
-
-        unimplemented!()
-    }
-
-    #[cfg(feature = "nope")]
-    pub async fn fetch_position_blocking(&mut self) -> Result<(f64, f64, f64)> {
-        debug!("fetching position");
-
-        let id = self.get_id();
-
-        debug!("id: {}", id);
-
-        let json = serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "printer.objects.query",
-                "params": {
-                    "objects": {
-                        "gcode_move": null,
-                    }
-                },
-                "id": id,
-        });
-
-        self.ws_write
-            .send(tokio_tungstenite::tungstenite::Message::Text(
-                json.to_string().into(),
-            ))
-            .await?;
-
-        let Some(Ok(msg)) = self.ws_read.next().await else {
-            bail!("Failed to get message from websocket");
-        };
-
-        debug!("fetch position msg: {}", msg.to_text().unwrap());
-
-        Ok((0., 0., 0.))
-    }
-}
-
 impl KlipperConn {
     pub async fn home_all(&mut self) -> Result<()> {
-        self._run_gcode("G28").await
+        self.run_gcode("G28").await
     }
 
     pub async fn home_xy(&mut self) -> Result<()> {
-        self._run_gcode("G28 X Y").await
+        self.run_gcode("G28 X Y").await
     }
 
     pub async fn get_position(&mut self) -> Result<(f64, f64, f64)> {
@@ -85,7 +40,7 @@ impl KlipperConn {
         tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
 
         let pos = loop {
-            debug!("get_position: waiting for position update");
+            // debug!("get_position: waiting for position update");
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
             let status = self.current_status.lock().await;
             let t1 = status.last_position_update;
@@ -101,37 +56,16 @@ impl KlipperConn {
         }
     }
 
-    #[cfg(feature = "nope")]
-    pub async fn fetch_position(&mut self) -> Result<(f64, f64, f64)> {
-        // Ok(pos)
-        todo!()
-    }
-
-    pub async fn pick_tool(&mut self, tool: usize) -> Result<()> {
+    pub async fn pick_tool(&mut self, tool: u32) -> Result<()> {
         let gcode = format!("T{}", tool);
-        self._run_gcode(&gcode).await
+        self.run_gcode(&gcode).await
     }
 
     pub async fn dropoff_tool(&mut self) -> Result<()> {
         let gcode = "T_1";
-        self._run_gcode(&gcode).await
+        self.run_gcode(&gcode).await
     }
 
-    pub async fn move_to_position(
-        &mut self,
-        pos: (f64, f64, f64),
-        bounce: Option<f64>,
-    ) -> Result<()> {
-        let Ok((x0, y0, _)) = self.get_position().await else {
-            bail!("Failed to get position");
-        };
-
-        debug!("x0: {}, y0: {}", x0, y0);
-
-        Ok(())
-    }
-
-    #[cfg(feature = "nope")]
     pub async fn move_to_position(
         &mut self,
         pos: (f64, f64, f64),
@@ -148,7 +82,7 @@ impl KlipperConn {
         if let Some(bounce_amount) = bounce {
             // let bounce_amount = 5.;
 
-            let Ok((x0, y0, _)) = self.fetch_position_blocking().await else {
+            let Ok((x0, y0, _)) = self.get_position().await else {
                 bail!("Failed to get position");
             };
 
@@ -175,34 +109,125 @@ impl KlipperConn {
         self.run_gcode(&gcode).await
     }
 
-    pub fn move_axis_relative(
+    pub async fn move_axis_relative(
         &mut self,
         axis: Axis,
         amount: f64,
         bounce: Option<f64>,
     ) -> Result<()> {
-        unimplemented!()
+        let axis = match axis {
+            Axis::X => "X",
+            Axis::Y => "Y",
+            // Axis::Z => "Z",
+            _ => bail!("Invalid axis"),
+        };
+
+        debug!("Moving axis {} by {}", axis, amount);
+
+        if let Some(bounce_amount) = bounce {
+            let Ok((x0, y0, _)) = self.get_position().await else {
+                bail!("Failed to get position");
+            };
+
+            // let bounce_amount = 5.;
+
+            let (m0, m1) = if amount > 0.0 {
+                (amount + bounce_amount, -bounce_amount)
+            } else {
+                (amount - bounce_amount, bounce_amount)
+            };
+
+            // debug!("Moving axis {} by {} and {}", axis, m0, m1);
+
+            self.run_gcode(&format!("_CLIENT_LINEAR_MOVE {}={}", axis, m0))
+                .await?;
+            self.run_gcode(&format!("_CLIENT_LINEAR_MOVE {}={}", axis, m1))
+                .await?;
+        } else {
+            self.run_gcode(&format!("_CLIENT_LINEAR_MOVE {}={}", axis, amount))
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn get_offsets(&mut self) -> Result<()> {
+        let vars = self.get_variables().await?;
+
+        let mut offsets = Vec::new();
+
+        let mut t = 0;
+        loop {
+            let Some(x) = vars[&format!("t{}_x_offset", t)].as_f64() else {
+                // anyhow!("Failed to parse tool {} x offset", t);
+                break;
+            };
+            let y = vars[&format!("t{}_y_offset", t)]
+                .as_f64()
+                .ok_or_else(|| anyhow!("Failed to parse tool {} y offset", t))?;
+            let z = vars[&format!("t{}_z_offset", t)]
+                .as_f64()
+                .ok_or_else(|| anyhow!("Failed to parse tool {} z offset", t))?;
+            offsets.push((x, y, z));
+
+            t += 1;
+        }
+
+        self.inbox
+            .send(super::KlipperMessage::ToolOffsets(offsets))
+            .map_err(|e| anyhow!("Failed to send tool offsets: {:?}", e))?;
+
+        Ok(())
     }
 }
 
 impl KlipperConn {
     async fn set_relative(&mut self) -> Result<()> {
-        self._run_gcode("G91").await
+        self.run_gcode("G91").await
     }
 
     async fn set_absolute(&mut self) -> Result<()> {
-        self._run_gcode("G90").await
+        self.run_gcode("G90").await
+    }
+
+    async fn get_variables(&mut self) -> Result<serde_json::Value> {
+        let t0 = Instant::now();
+        debug!("getting vars");
+        let json = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "printer.objects.query",
+                "params": {
+                    "objects": {
+                        "save_variables": null,
+                    }
+                },
+                "id": self.get_id(),
+        });
+
+        self.ws_write
+            .send(tokio_tungstenite::tungstenite::Message::Text(
+                json.to_string().into(),
+            ))
+            .await?;
+
+        loop {
+            if let Some(vars) = &self.current_status.lock().await.vars {
+                if t0 > vars.0 {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                    continue;
+                }
+                debug!(
+                    "got vars: {}",
+                    serde_json::to_string_pretty(&vars.1).unwrap()
+                );
+
+                return Ok(vars.1.clone());
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
     }
 
     async fn run_gcode(&mut self, gcode: &str) -> Result<()> {
-        // if !self.current_status.absolute_coordinates {
-        //     self.set_absolute().await?;
-        // }
-
-        todo!()
-    }
-
-    async fn _run_gcode(&mut self, gcode: &str) -> Result<()> {
         let json = serde_json::json!({
                 "jsonrpc": "2.0",
                 "method": "printer.gcode.script",

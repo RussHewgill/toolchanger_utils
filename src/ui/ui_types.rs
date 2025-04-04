@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::vision::preprocess::{PreprocessStep, PreprocessStepType};
 
@@ -40,7 +40,7 @@ pub struct App {
     pub vision_settings: crate::vision::VisionSettings,
 
     #[serde(skip)]
-    pub webcam_settings_mutex: Arc<Mutex<crate::vision::VisionSettings>>,
+    pub webcam_settings_mutex: Arc<std::sync::Mutex<crate::vision::VisionSettings>>,
 
     pub options: crate::options::Options,
 
@@ -85,6 +85,9 @@ pub struct App {
     pub klipper_tx: Option<tokio::sync::mpsc::Sender<crate::klipper_async::KlipperCommand>>,
     #[serde(skip)]
     pub inbox: egui_inbox::UiInbox<crate::klipper_async::KlipperMessage>,
+
+    #[serde(skip)]
+    pub klipper_status: Option<Arc<tokio::sync::Mutex<crate::klipper_async::KlipperStatus>>>,
 
     #[serde(skip)]
     /// for display only, not for sending to klipper

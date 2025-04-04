@@ -12,6 +12,8 @@ pub struct Options {
     pub camera_size: (f64, f64),
     pub camera_scale: f64,
 
+    pub z_height: f64,
+
     #[serde(skip)]
     pub auto_offset_settings: AutoOffsetSettings,
 }
@@ -25,6 +27,9 @@ impl Default for Options {
             bounce_amount: 0.5,
             camera_size: (1280., 800.),
             camera_scale: 0.5,
+
+            z_height: 33.51,
+
             auto_offset_settings: AutoOffsetSettings::default(),
         }
     }

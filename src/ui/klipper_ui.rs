@@ -45,31 +45,77 @@ impl App {
     }
 
     pub fn get_position(&mut self) -> Option<(f64, f64, f64)> {
-        todo!()
+        let Some(s) = self.klipper_status.as_ref() else {
+            debug!("klipper is not connected");
+            return None;
+        };
+
+        let pos = s.blocking_lock().position;
+
+        pos
     }
 
     pub fn fetch_position(&mut self) -> Option<(f64, f64, f64)> {
-        todo!()
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        self.send_klipper(KlipperCommand::GetPosition(tx));
+
+        let Ok(pos) = rx.blocking_recv() else {
+            error!("Failed to get position from klipper");
+            return None;
+        };
+
+        pos
     }
 
     pub fn move_to_position(&mut self, pos: (f64, f64), bounce: bool) {
-        todo!()
+        self.send_klipper(KlipperCommand::MoveToPosition(
+            (pos.0, pos.1, self.options.z_height),
+            if bounce {
+                Some(self.options.bounce_amount)
+            } else {
+                None
+            },
+        ));
     }
 
+    #[cfg(feature = "nope")]
     pub fn move_relative(&mut self, amount: (f64, f64), bounce: bool) {
         todo!()
     }
 
     pub fn move_axis_relative(&mut self, axis: Axis, amount: f64, bounce: bool) {
-        todo!()
+        self.send_klipper(KlipperCommand::MoveAxisRelative(
+            axis,
+            amount,
+            if bounce {
+                Some(self.options.bounce_amount)
+            } else {
+                None
+            },
+        ));
     }
 
     pub fn dropoff_tool(&mut self) {
-        todo!()
+        self.send_klipper(KlipperCommand::DropTool);
+        self.active_tool = None;
     }
 
     pub fn pickup_tool(&mut self, tool: i32, move_to_camera: bool) {
-        todo!()
+        if tool < 0 {
+            error!("Invalid tool number: {}", tool);
+            return;
+        }
+
+        self.send_klipper(KlipperCommand::PickTool(tool as u32));
+
+        self.active_tool = Some(tool as usize);
+
+        if move_to_camera {
+            if let Some(pos) = self.camera_pos {
+                self.move_to_position(pos, true);
+            }
+        }
     }
 
     pub fn adjust_offset_from_camera(&mut self, tool: usize, (x, y): (f64, f64)) {

@@ -16,16 +16,19 @@ use url::Url;
 
 use crate::{ui::ui_types::Axis, vision::WebcamMessage};
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug)]
 pub enum KlipperCommand {
     // MovePosition((f64, f64), Option<f64>),
     MoveToPosition((f64, f64, f64), Option<f64>),
-    MovePositionRelative((f64, f64), Option<f64>),
+    // MovePositionRelative((f64, f64), Option<f64>),
+    MoveAxisRelative(Axis, f64, Option<f64>),
     HomeXY,
     HomeAll,
+    GetPosition(tokio::sync::oneshot::Sender<Option<(f64, f64, f64)>>),
     PickTool(u32),
     DropTool,
     AdjustToolOffset(u32, Axis, f64),
+    GetToolOffsets,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -37,6 +40,7 @@ pub enum KlipperMessage {
     // ZHeight(f64),
     // ZHeightStale,
     KlipperError(String),
+    ToolOffsets(Vec<(f64, f64, f64)>),
 }
 
 pub struct KlipperConn {
@@ -61,6 +65,7 @@ pub struct KlipperStatus {
     pub position: Option<(f64, f64, f64)>,
     // pub active_tool: Option<u32>,
     pub homed_axes: (bool, bool, bool),
+    pub vars: Option<(Instant, serde_json::Value)>,
 }
 
 impl Default for KlipperStatus {
@@ -71,34 +76,51 @@ impl Default for KlipperStatus {
             position: None,
             // active_tool: None,
             homed_axes: (false, false, false),
+            vars: None,
         }
     }
 }
 
 impl KlipperStatus {
+    fn _update_pos(
+        &mut self,
+        sender: &UiInboxSender<KlipperMessage>,
+        pos: &serde_json::Value,
+    ) -> Result<()> {
+        match (pos[0].as_f64(), pos[1].as_f64(), pos[2].as_f64()) {
+            (Some(x), Some(y), Some(z)) => {
+                let pos = (x, y, z);
+                sender
+                    .send(KlipperMessage::Position(pos))
+                    .map_err(|e| anyhow!("Failed to send position message: {:?}", e))?;
+                self.position = Some(pos);
+                self.last_position_update = Instant::now();
+            }
+            _ => {
+                error!("Invalid gcode_position: {:?}", pos);
+            }
+        }
+
+        Ok(())
+    }
+
     fn update(
         &mut self,
         sender: &UiInboxSender<KlipperMessage>,
         json: &serde_json::Value,
     ) -> Result<()> {
-        debug!("updating status");
+        // debug!("updating status");
 
         if let Some(pos) = json.pointer("/result/status/gcode_move/gcode_position") {
-            match (pos[0].as_f64(), pos[1].as_f64(), pos[2].as_f64()) {
-                (Some(x), Some(y), Some(z)) => {
-                    let pos = (x, y, z);
-                    sender
-                        .send(KlipperMessage::Position(pos))
-                        .map_err(|e| anyhow!("Failed to send position message: {:?}", e))?;
-                    self.position = Some(pos);
-                    self.last_position_update = Instant::now();
-                }
-                _ => {
-                    error!("Invalid gcode_position: {:?}", pos);
-                }
-            }
-        } else {
-            debug!("gcode_move not found");
+            self._update_pos(sender, pos)?;
+        }
+
+        if let Some(pos) = json.pointer("/result/status/toolhead/position") {
+            self._update_pos(sender, pos)?;
+        }
+
+        if let Some(vars) = json.pointer("/result/status/save_variables/variables") {
+            self.vars = Some((Instant::now(), vars.clone()));
         }
 
         let Some(data) = json.pointer("/params/0/toolhead") else {
@@ -106,20 +128,9 @@ impl KlipperStatus {
             return Ok(());
         };
 
+        // debug!("updating status");
         if let Some(pos) = data.get("position") {
-            match (pos[0].as_f64(), pos[1].as_f64(), pos[2].as_f64()) {
-                (Some(x), Some(y), Some(z)) => {
-                    let pos = (x, y, z);
-                    sender
-                        .send(KlipperMessage::Position(pos))
-                        .map_err(|e| anyhow!("Failed to send position message: {:?}", e))?;
-                    self.position = Some(pos);
-                    self.last_position_update = Instant::now();
-                }
-                _ => {
-                    error!("Invalid gcode_position: {:?}", pos);
-                }
-            }
+            self._update_pos(sender, pos)?;
         }
 
         if let Some(axes) = data.get("homed_axes").and_then(|v| v.as_str()) {
@@ -156,6 +167,7 @@ impl KlipperConn {
         inbox: UiInboxSender<KlipperMessage>,
         // inbox_position: UiInboxSender<(f64, f64, f64)>,
         rx: tokio::sync::mpsc::Receiver<KlipperCommand>,
+        tx_status: tokio::sync::oneshot::Sender<Arc<Mutex<KlipperStatus>>>,
     ) -> Result<Self> {
         let url = format!("ws://{}:7125/websocket", url.host_str().unwrap());
 
@@ -172,6 +184,10 @@ impl KlipperConn {
         let status2 = current_status.clone();
         let inbox2 = inbox.clone();
         tokio::spawn(Self::listener(status2, inbox2, ws_read));
+
+        tx_status.send(current_status.clone()).unwrap_or_else(|e| {
+            error!("Failed to send status: {:?}", e);
+        });
 
         let mut out = KlipperConn {
             url,
@@ -203,7 +219,7 @@ impl KlipperConn {
 
             match msg {
                 Ok(msg) => {
-                    debug!("handling msg");
+                    // debug!("handling msg");
                     Self::handle_message(&status, &inbox, msg)
                         .await
                         .unwrap_or_else(|e| {
@@ -230,10 +246,10 @@ impl KlipperConn {
             "method": "printer.objects.subscribe",
             "params": {
                 "objects": {
-                    // "gcode_move": ["absolute_coordinates"],
-                    // "toolhead": ["position", "status", "homed_axes"],
+                    "gcode_move": ["absolute_coordinates"],
+                    "toolhead": ["position", "status", "homed_axes"],
                     // "motion_report": null,
-                    "idle_timeout": null,
+                    // "idle_timeout": null,
                 }
             },
             "id": self.get_id(),
@@ -269,12 +285,20 @@ impl KlipperConn {
     async fn handle_command(&mut self, cmd: KlipperCommand) -> Result<()> {
         match cmd {
             KlipperCommand::MoveToPosition(pos, bounce) => self.move_to_position(pos, bounce).await,
-            KlipperCommand::MovePositionRelative(_, _) => todo!(),
+            // KlipperCommand::MovePositionRelative(_, _) => todo!(),
+            KlipperCommand::MoveAxisRelative(axis, amount, bounce) => {
+                self.move_axis_relative(axis, amount, bounce).await
+            }
             KlipperCommand::HomeXY => self.home_xy().await,
             KlipperCommand::HomeAll => self.home_all().await,
-            KlipperCommand::PickTool(_) => todo!(),
-            KlipperCommand::DropTool => todo!(),
+            KlipperCommand::GetPosition(tx) => {
+                tx.send(self.get_position().await.ok()).unwrap();
+                Ok(())
+            }
+            KlipperCommand::PickTool(tool) => self.pick_tool(tool).await,
+            KlipperCommand::DropTool => self.dropoff_tool().await,
             KlipperCommand::AdjustToolOffset(_, axis, _) => todo!(),
+            KlipperCommand::GetToolOffsets => self.get_offsets().await,
         }
     }
 
