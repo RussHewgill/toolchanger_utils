@@ -46,6 +46,36 @@ fn main() -> opencv::Result<()> {
 // #[cfg(feature = "nope")]
 #[tokio::main]
 async fn main() -> Result<()> {
+    logging::init_logs();
+    // // let url = "ws://192.168.0.245:7125/klippysocket";
+    // let url = "ws://192.168.0.245:7125/websocket";
+
+    // let url = url::Url::parse("ws://192.168.0.245:7125/klippysocket")?;
+    let url = url::Url::parse("ws://192.168.0.245:7125/websocket")?;
+
+    let inbox: egui_inbox::UiInbox<klipper_async::KlipperMessage> = egui_inbox::UiInbox::new();
+
+    let (tx, rx) = tokio::sync::mpsc::channel(1);
+
+    tx.send(klipper_async::KlipperCommand::MoveToPosition(
+        (150., 150., 40.),
+        Some(0.5),
+    ))
+    .await?;
+
+    let mut klipper = klipper_async::KlipperConn::new(url, inbox.sender(), rx).await?;
+
+    klipper.subscribe_to_defaults().await?;
+
+    klipper.run().await?;
+
+    Ok(())
+}
+
+/// Async klipper tests
+#[cfg(feature = "nope")]
+// #[tokio::main]
+async fn main() -> Result<()> {
     use futures_util::{SinkExt, StreamExt};
     use tokio::io::AsyncBufReadExt;
     use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
@@ -122,7 +152,7 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "toolchanger_utils",
         native_options,
-        Box::new(|cc| Ok(Box::new(App::new(cc)))),
+        Box::new(|cc| Ok(Box::new(ui::ui_types::App::new(cc)))),
     )
 }
 

@@ -4,9 +4,8 @@ use crate::vision::preprocess::{PreprocessStep, PreprocessStepType};
 
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 pub struct App {
-    #[serde(skip)]
-    pub klipper: Option<crate::klipper_protocol::KlipperProtocol>,
-
+    // #[serde(skip)]
+    // pub klipper: Option<crate::klipper_protocol::KlipperProtocol>,
     #[serde(skip)]
     pub errors: Vec<String>,
 
@@ -78,6 +77,18 @@ pub struct App {
     pub camera_formats_request_sent: bool,
     // #[serde(skip)]
     pub selected_camera_format: Option<crate::vision::CameraFormat>,
+
+    #[serde(skip)]
+    pub klipper_started: bool,
+
+    #[serde(skip)]
+    pub klipper_tx: Option<tokio::sync::mpsc::Sender<crate::klipper_async::KlipperCommand>>,
+    #[serde(skip)]
+    pub inbox: egui_inbox::UiInbox<crate::klipper_async::KlipperMessage>,
+
+    #[serde(skip)]
+    /// for display only, not for sending to klipper
+    pub last_position: (f64, f64, f64),
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, PartialOrd)]

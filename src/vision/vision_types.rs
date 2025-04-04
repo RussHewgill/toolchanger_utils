@@ -19,6 +19,7 @@ pub enum NozzlePosition {
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WebcamCommand {
+    ConnectCamera(usize),
     SaveScreenshot(Option<(f64, f64)>),
     SetCameraControl(CameraControl),
     GetCameraFormats,

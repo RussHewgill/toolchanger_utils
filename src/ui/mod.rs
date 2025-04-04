@@ -1,3 +1,4 @@
+// pub mod app;
 pub mod auto_offset;
 pub mod data_labeling;
 pub mod klipper_ui;
@@ -5,6 +6,7 @@ pub mod preprocess_ui;
 pub mod ui_types;
 pub mod webcam_controls;
 
+use tracing_subscriber::field::debug;
 use ui_types::*;
 
 use anyhow::{anyhow, bail, ensure, Context, Result};
@@ -40,24 +42,6 @@ impl App {
             out.camera_pos = Some(data.camera_position);
         }
 
-        // out.list_sort = Some((0, history_tab::SortOrder::Descending));
-
-        // let filter = nucleo::Nucleo::new(
-        //     nucleo::Config::DEFAULT,
-        //     std::sync::Arc::new(|| {
-        //         //
-        //     }),
-        //     Some(1),
-        //     1,
-        // );
-
-        // let injector = filter.injector();
-
-        // out.nucleo = Some(filter);
-        // out.injector = Some(injector);
-
-        // out.reload_db();
-
         out
     }
 }
@@ -65,6 +49,7 @@ impl App {
 /// controls
 impl App {
     fn controls(&mut self, ui: &mut egui::Ui) {
+        #[cfg(feature = "nope")]
         if self.klipper.is_none() {
             ui.label("No Klipper connection");
             ui.label(format!("Printer URL: {}", self.options.printer_url));
@@ -756,8 +741,26 @@ impl App {
 
                     ui.horizontal(|ui| {
                         ui.label("Scale: ");
-                        ui.radio_value(&mut self.options.camera_scale, 0.5, "x0.5");
-                        ui.radio_value(&mut self.options.camera_scale, 1.0, "x1.0");
+                        let r0 = ui.radio_value(&mut self.options.camera_scale, 0.5, "x0.5");
+                        let r1 = ui.radio_value(&mut self.options.camera_scale, 1.0, "x1.0");
+
+                        if r0.changed() || r1.changed() {
+                            // let r = ui.ctx().input(|i: &egui::InputState| i.screen_rect());
+
+                            /// 1371, 848
+                            /// 1714, 1223
+                            // debug!("r = {:?}", r);
+                            let s = match self.options.camera_scale {
+                                0.5 => Vec2::new(1200., 850.),
+                                1.0 => Vec2::new(1750., 1250.),
+                                _ => unimplemented!(),
+                            };
+
+                            ui.ctx()
+                                .send_viewport_cmd(egui::ViewportCommand::InnerSize(s));
+
+                            //
+                        }
                     });
 
                     ui.end_row();
@@ -943,6 +946,66 @@ impl eframe::App for App {
         eframe::set_value(storage, eframe::APP_KEY, self);
     }
 
+    #[cfg(feature = "nope")]
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+
+        /// start async thread
+        if !self.klipper_started {
+            debug!("starting klipper thread");
+            let url = url::Url::parse(&format!("{}", self.options.printer_url)).unwrap();
+            let url = url::Url::parse(&format!("ws://{}:7125/websocket", url.host_str().unwrap()))
+                .unwrap();
+
+            // debug!("url = {}", url);
+
+            let sender_pos = self.inbox.sender();
+
+            let (tx, rx) = crossbeam_channel::bounded(1);
+
+            std::thread::spawn(move || {
+                // let rt = tokio::runtime::Runtime::new().unwrap();
+                let rt = tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(4)
+                    .enable_all()
+                    .build()
+                    .unwrap();
+
+                rt.block_on(async move {
+                    let mut klipper = crate::klipper_async::KlipperConn::new(url, sender_pos, rx)
+                        .await
+                        .unwrap();
+                    klipper.run().await.unwrap();
+                });
+            });
+
+            self.klipper_started = true;
+        }
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            // while let Some(msg) = self.inbox_position.read(ui).next() {
+            //     debug!("Got message: {:?}", msg);
+            // }
+
+            if let Some(pos) = self.inbox.read(ui).last() {
+                // self.last_position = pos;
+                unimplemented!()
+            }
+
+            ui.label("Current Position:");
+            ui.label(format!("X: {:.3}", self.last_position.0));
+            ui.label(format!("Y: {:.3}", self.last_position.1));
+            ui.label(format!("Z: {:.3}", self.last_position.2));
+
+            // ui
+
+            //
+        });
+    }
+
+    // #[cfg(feature = "nope")]
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         // if cfg!(debug_assertions) && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         //     ctx.send_viewport_cmd(egui::ViewportCommand::Close);

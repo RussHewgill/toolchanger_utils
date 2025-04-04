@@ -12,6 +12,7 @@ preview*.png
 *.model/target
 *.jpg
 test_images/*
+test_images
 *.dll
 config.toml
 auto_offset2.rs

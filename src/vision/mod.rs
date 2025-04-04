@@ -28,50 +28,57 @@ use blob_detection::BlobDetectors;
 pub fn spawn_locator_thread(
     ctx: egui::Context,
     mut handle: egui::TextureHandle,
-    index: usize,
+    mut index: usize,
     channel_from_ui: crossbeam_channel::Receiver<WebcamCommand>,
     channel_to_ui: crossbeam_channel::Sender<WebcamMessage>,
     webcam_settings_mutex: Arc<Mutex<crate::vision::VisionSettings>>,
     // camera_size: (f64, f64),
     mut format: Option<CameraFormat>,
 ) {
-    std::thread::spawn(move || loop {
+    std::thread::spawn(move || {
         debug!("Camera supervisor thread running");
-        while let Ok(cmd) = channel_from_ui.try_recv() {
-            match cmd {
-                WebcamCommand::SaveScreenshot(_) => {}
-                WebcamCommand::SetCameraControl(camera_control) => {}
-                WebcamCommand::GetCameraFormats => {
-                    if let Err(e) = get_camera_formats(index, &channel_to_ui) {
-                        debug!("Failed to get camera formats: {}", e);
+        loop {
+            while let Ok(cmd) = channel_from_ui.try_recv() {
+                match cmd {
+                    WebcamCommand::ConnectCamera(i) => {
+                        index = i;
+
+                        //
+                    }
+                    WebcamCommand::SaveScreenshot(_) => {}
+                    WebcamCommand::SetCameraControl(camera_control) => {}
+                    WebcamCommand::GetCameraFormats => {
+                        if let Err(e) = get_camera_formats(index, &channel_to_ui) {
+                            debug!("Failed to get camera formats: {}", e);
+                        }
+                    }
+                    WebcamCommand::SetCameraFormat(f) => {
+                        debug!("Setting camera format: {:?}", f);
+                        format = Some(f);
                     }
                 }
-                WebcamCommand::SetCameraFormat(f) => {
-                    debug!("Setting camera format: {:?}", f);
-                    format = Some(f);
+            }
+
+            // #[cfg(feature = "nope")]
+            if let Some(format) = format {
+                debug!("Spawning camera thread, format = {:?}", format);
+                if let Err(e) = _spawn_camera_thread(
+                    ctx.clone(),
+                    handle.clone(),
+                    index,
+                    &channel_from_ui,
+                    &channel_to_ui,
+                    webcam_settings_mutex.clone(),
+                    // camera_size,
+                    format,
+                ) {
+                    debug!("Failed to spawn camera thread: {}", e);
                 }
             }
-        }
 
-        debug!("Spawning camera thread, format = {:?}", format);
-        // #[cfg(feature = "nope")]
-        if let Some(format) = format {
-            if let Err(e) = _spawn_camera_thread(
-                ctx.clone(),
-                handle.clone(),
-                index,
-                &channel_from_ui,
-                &channel_to_ui,
-                webcam_settings_mutex.clone(),
-                // camera_size,
-                format,
-            ) {
-                debug!("Failed to spawn camera thread: {}", e);
-            }
+            // debug!("Looping");
+            std::thread::sleep(std::time::Duration::from_millis(50));
         }
-
-        // debug!("Looping");
-        std::thread::sleep(std::time::Duration::from_millis(50));
     });
 }
 
@@ -82,11 +89,10 @@ fn get_camera_formats(
     // debug!("Getting camera formats");
     let format = RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
 
-    let mut camera =
-        nokhwa::Camera::new(nokhwa::utils::CameraIndex::Index(index as u32), format).unwrap();
+    let mut camera = nokhwa::Camera::new(nokhwa::utils::CameraIndex::Index(index as u32), format)?;
 
     let mut formats = std::collections::HashSet::new();
-    for f in camera.compatible_camera_formats().unwrap() {
+    for f in camera.compatible_camera_formats()? {
         // debug!("Compatible format: {:?}", f);
         if f.format() == nokhwa::utils::FrameFormat::MJPEG {
             // debug!("Compatible format: {:?}", f);
@@ -209,6 +215,9 @@ fn _spawn_camera_thread(
     loop {
         while let Ok(cmd) = channel_from_ui.try_recv() {
             match cmd {
+                WebcamCommand::ConnectCamera(_) => {
+                    error!("ConnectCamera command received in camera thread");
+                }
                 WebcamCommand::SaveScreenshot(s) => {
                     screenshots.push_back(s);
                 }
