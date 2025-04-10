@@ -18,7 +18,7 @@ impl KlipperConn {
     }
 
     pub async fn get_position(&mut self) -> Result<(f64, f64, f64)> {
-        let t0 = self.current_status.lock().await.last_position_update;
+        let t0 = self.current_status.read().await.last_position_update;
 
         let json = serde_json::json!({
                 "jsonrpc": "2.0",
@@ -42,7 +42,7 @@ impl KlipperConn {
         let pos = loop {
             // debug!("get_position: waiting for position update");
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-            let status = self.current_status.lock().await;
+            let status = self.current_status.read().await;
             let t1 = status.last_position_update;
             if t1 > t0 {
                 break status.position;
@@ -118,13 +118,16 @@ impl KlipperConn {
         let axis = match axis {
             Axis::X => "X",
             Axis::Y => "Y",
-            // Axis::Z => "Z",
-            _ => bail!("Invalid axis"),
+            Axis::Z => "Z",
+            // _ => bail!("Invalid axis"),
         };
 
         debug!("Moving axis {} by {}", axis, amount);
 
-        if let Some(bounce_amount) = bounce {
+        if axis == "Z" {
+            self.run_gcode(&format!("_CLIENT_LINEAR_MOVE Z={} F=500", amount))
+                .await?;
+        } else if let Some(bounce_amount) = bounce {
             let Ok((x0, y0, _)) = self.get_position().await else {
                 bail!("Failed to get position");
             };
@@ -149,6 +152,18 @@ impl KlipperConn {
         }
 
         Ok(())
+    }
+
+    pub async fn disable_motors(&mut self) -> Result<()> {
+        self.run_gcode("M18").await
+    }
+
+    pub async fn wait_for_moves(&mut self) -> Result<()> {
+        self.run_gcode("M400").await
+    }
+
+    pub async fn dwell(&mut self, ms: u32) -> Result<()> {
+        self.run_gcode(&format!("G4 P{}", ms)).await
     }
 
     pub async fn get_offsets(&mut self) -> Result<()> {
@@ -210,21 +225,24 @@ impl KlipperConn {
             ))
             .await?;
 
-        loop {
-            if let Some(vars) = &self.current_status.lock().await.vars {
+        let vars = loop {
+            let status = &self.current_status.read().await;
+
+            if let Some(vars) = status.vars.as_ref() {
                 if t0 > vars.0 {
                     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
                     continue;
+                } else {
+                    break vars.1.clone();
                 }
-                debug!(
-                    "got vars: {}",
-                    serde_json::to_string_pretty(&vars.1).unwrap()
-                );
-
-                return Ok(vars.1.clone());
+            } else {
+                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
             }
-            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-        }
+        };
+
+        self.current_status.write().await.vars = None;
+
+        Ok(vars)
     }
 
     async fn run_gcode(&mut self, gcode: &str) -> Result<()> {

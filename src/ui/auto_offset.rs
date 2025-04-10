@@ -19,6 +19,8 @@ pub struct AutoOffset {
 
     check_repeatability: usize,
 
+    current_n: usize,
+
     /// (position, guessed offset from center)
     repeatability: Vec<((f64, f64), (f64, f64))>,
 }
@@ -32,17 +34,19 @@ pub struct AutoOffsetSettings {
     pub min_interval_between_moves: f64,
     pub swap_axes: bool,
     pub mirror_axes: (bool, bool),
+    pub resolution: f64,
 }
 
 impl Default for AutoOffsetSettings {
     fn default() -> Self {
         AutoOffsetSettings {
             // target_max_offset: 0.01,
-            target_max_offset: 0.005,
+            target_max_offset: 0.00625,
             min_confidence_for_move: 0.95,
             min_interval_between_moves: 2.0,
             swap_axes: true,
             mirror_axes: (false, true),
+            resolution: 0.00625,
         }
     }
 }
@@ -55,6 +59,7 @@ impl Default for AutoOffset {
             last_move: Instant::now(),
             current_tool: -1,
             check_repeatability: 0,
+            current_n: 0,
             repeatability: Vec::new(),
         }
     }
@@ -91,7 +96,16 @@ impl AutoOffset {
         self.check_repeatability = 10;
     }
 
-    pub fn process_repeatibility(&self) {
+    pub fn start_homing(&mut self, pos: (f64, f64), tool: i32) {
+        *self = Self::default();
+
+        self.auto_offset_type = AutoOffsetType::HomingTest;
+        self.prev_position = pos;
+        self.current_tool = tool;
+        self.check_repeatability = 10;
+    }
+
+    pub fn process_repeatibility(&self, homing: bool) {
         debug!("Repeatability results:");
 
         let mut xs = self
@@ -139,8 +153,29 @@ impl AutoOffset {
         debug!("Max: ({:.3}, {:.3})", max_x, max_y);
         debug!("Range: ({:.3}, {:.3})", range_x, range_y);
 
-        // Save data points to a file
-        let file_path = format!("repeatability_tool_{}_data.txt", self.current_tool);
+        let output_dir = "data_output";
+        if !std::path::Path::new(output_dir).exists() {
+            std::fs::create_dir(output_dir).unwrap_or_else(|_| {
+                error!("Failed to create output directory: {}", output_dir);
+            });
+        }
+
+        let now = std::time::SystemTime::now();
+        let now: chrono::DateTime<chrono::Utc> = now.into();
+        let now = now.format("%Y-%m-%d_%H-%M-%S");
+
+        let file_path = if homing {
+            format!(
+                "{}/repeatability_homing_tool_{}_data_{}.txt",
+                output_dir, self.current_tool, now
+            )
+        } else {
+            format!(
+                "{}/repeatability_tool_{}_data_{}.txt",
+                output_dir, self.current_tool, now
+            )
+        };
+
         match std::fs::File::create(&file_path) {
             Ok(mut file) => {
                 use std::io::Write;
@@ -164,17 +199,17 @@ impl AutoOffset {
                 }
 
                 // Write statistics
-                if let Err(e) = writeln!(&mut file, "\nStatistics:") {
+                if let Err(e) = writeln!(&mut file, "\nStatistics: Tool {}", self.current_tool) {
                     error!("Failed to write to file: {}", e);
                     return;
                 }
 
                 let stats = [
-                    ("Median", median_x, median_y),
-                    ("Mean", mean_x, mean_y),
+                    // ("Median", median_x, median_y),
+                    // ("Mean", mean_x, mean_y),
                     ("StdDev", std_dev_x, std_dev_y),
-                    ("Min", min_x, min_y),
-                    ("Max", max_x, max_y),
+                    // ("Min", min_x, min_y),
+                    // ("Max", max_x, max_y),
                     ("Range", range_x, range_y),
                 ];
 
@@ -193,6 +228,10 @@ impl AutoOffset {
             }
         }
     }
+
+    pub fn repeatability_count_mut(&mut self) -> &mut usize {
+        &mut self.check_repeatability
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -201,6 +240,7 @@ pub enum AutoOffsetType {
     SingleTool,
     AllTools,
     RepeatabilityTest,
+    HomingTest,
 }
 
 impl App {
@@ -247,68 +287,81 @@ impl App {
             );
         });
 
-        egui_extras::TableBuilder::new(ui)
-            .id_salt("Running Average Table")
-            .column(Column::exact(100.))
-            .columns(Column::exact(80.), 5)
-            .striped(true)
-            .header(20., |mut row| {
-                row.col(|ui| {});
-                row.col(|ui| {});
-                row.col(|ui| {
-                    ui.label("X");
-                });
-                row.col(|ui| {
-                    ui.label("Y");
-                });
-                row.col(|ui| {
-                    ui.label("radius");
-                });
-            })
-            .body(|mut body| {
-                if let Some((confidence, (c_x, c_y, c_r))) = confidence {
-                    body.row(20., |mut row| {
-                        row.col(|ui| {
-                            ui.label("Confidence:");
-                        });
-                        row.col(|ui| {
-                            ui.label(format!("{:.3}", confidence));
-                        });
-                        row.col(|ui| {
-                            ui.label(format!("{:.4}", c_x));
-                        });
-                        row.col(|ui| {
-                            ui.label(format!("{:.4}", c_y));
-                        });
-                        row.col(|ui| {
-                            ui.label(format!("{:.1}", c_r));
-                        });
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                egui_extras::TableBuilder::new(ui)
+                    .id_salt("Running Average Table")
+                    .column(Column::exact(100.))
+                    .columns(Column::exact(80.), 5)
+                    .striped(true)
+                    .header(20., |mut row| {
                         row.col(|ui| {});
-                    });
-                }
-                if let Some((x, y, r)) = guess {
-                    body.row(20., |mut row| {
-                        let (x, y, r) = self._pixels_to_mm_from_center(x, y, r);
+                        row.col(|ui| {});
+                        row.col(|ui| {
+                            ui.label("X");
+                        });
+                        row.col(|ui| {
+                            ui.label("Y");
+                        });
+                        row.col(|ui| {
+                            ui.label("radius");
+                        });
+                    })
+                    .body(|mut body| {
+                        if let Some((confidence, (c_x, c_y, c_r))) = confidence {
+                            body.row(20., |mut row| {
+                                row.col(|ui| {
+                                    ui.label("Confidence:");
+                                });
+                                row.col(|ui| {
+                                    ui.label(format!("{:.3}", confidence));
+                                });
+                                row.col(|ui| {
+                                    ui.label(format!("{:.4}", c_x));
+                                });
+                                row.col(|ui| {
+                                    ui.label(format!("{:.4}", c_y));
+                                });
+                                row.col(|ui| {
+                                    ui.label(format!("{:.1}", c_r));
+                                });
+                                row.col(|ui| {});
+                            });
+                        }
+                        if let Some((x, y, r)) = guess {
+                            body.row(20., |mut row| {
+                                let (x, y, r) = self._pixels_to_mm_from_center(x, y, r);
 
-                        row.col(|ui| {
-                            ui.label("Current Guess:");
-                        });
-                        row.col(|_| {});
-                        row.col(|ui| {
-                            ui.label(format!("{:.4}", x));
-                        });
-                        row.col(|ui| {
-                            ui.label(format!("{:.4}", y));
-                        });
-                        row.col(|ui| {
-                            ui.label(format!("{:.1}", r));
-                        });
-                        row.col(|ui| {
-                            ui.label(format!("{:.0}", std::f64::consts::PI * r * r));
-                        });
+                                row.col(|ui| {
+                                    ui.label("Current Guess:");
+                                });
+                                row.col(|_| {});
+                                row.col(|ui| {
+                                    ui.label(format!("{:.4}", x));
+                                });
+                                row.col(|ui| {
+                                    ui.label(format!("{:.4}", y));
+                                });
+                                row.col(|ui| {
+                                    ui.label(format!("{:.1}", r));
+                                });
+                                row.col(|ui| {
+                                    ui.label(format!("{:.0}", std::f64::consts::PI * r * r));
+                                });
+                            });
+                        }
                     });
-                }
             });
+
+            ui.separator();
+
+            ui.vertical(|ui| {
+                ui.group(|ui| {
+                    self.auto_offset_controls(ui);
+                    ui.allocate_space(ui.available_size());
+                });
+            });
+        });
 
         if confidence.is_some() && guess.is_some() {
             let confidence = confidence.unwrap();
@@ -352,12 +405,37 @@ impl App {
                 AutoOffsetType::RepeatabilityTest => {
                     self._auto_offset_repeatability(ui, (move_x, move_y))
                 }
+                AutoOffsetType::HomingTest => {
+                    self._auto_offset_repeatability(ui, (move_x, move_y));
+                }
             }
 
             //
         }
 
         //
+    }
+
+    fn auto_offset_controls(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            let resp = ui.add(
+                egui::Slider::new(
+                    &mut self.options.auto_offset_settings.target_max_offset,
+                    0.0..=0.05,
+                )
+                .text("Target Accuracy")
+                .show_value(true),
+            );
+
+            ui.label(format!(
+                "(resolution: {:.5})",
+                self.klipper_status_frame
+                    .as_ref()
+                    .map(|f| f.resolution)
+                    .unwrap_or(-1.)
+            ));
+        });
+        // unimplemented!()
     }
 
     fn _auto_offset_single(&mut self, ui: &mut egui::Ui, (x, y): (f64, f64)) {
@@ -369,19 +447,66 @@ impl App {
             return;
         }
 
+        /// if the nozzle isn't centered, but the offset is too small to move, stop
+        if x.abs() < self.options.auto_offset_settings.resolution
+            && y.abs() < self.options.auto_offset_settings.resolution
+        {
+            self.auto_offset.stop();
+            return;
+        }
+
         debug!("Moving to center: ({:.4}, {:.4})", x, y);
 
-        self.move_axis_relative(Axis::X, x, true);
-        self.move_axis_relative(Axis::Y, y, true);
+        // self.move_axis_relative(Axis::X, x, true);
+        // self.move_axis_relative(Axis::Y, y, true);
+
+        if x.abs() > self.options.auto_offset_settings.target_max_offset
+            && x.abs() > self.options.auto_offset_settings.resolution
+        {
+            if x.abs() < 0.01 {
+                debug!("Fine tuning X axis: ({:.5})", x / 4.);
+                self.move_axis_relative(Axis::X, x / 4., true);
+            } else {
+                self.move_axis_relative(Axis::X, x, true);
+            }
+        }
+
+        if y.abs() > self.options.auto_offset_settings.target_max_offset
+            && y.abs() > self.options.auto_offset_settings.resolution
+        {
+            if y.abs() < 0.01 {
+                debug!("Fine tuning Y axis: ({:.5})", y / 4.);
+                self.move_axis_relative(Axis::Y, y / 4., true);
+            } else {
+                self.move_axis_relative(Axis::Y, y, true);
+            }
+        }
 
         self.auto_offset.last_move = Instant::now();
     }
 
     fn _auto_offset_repeatability(&mut self, ui: &mut egui::Ui, (x, y): (f64, f64)) {
+        let mut stop = false;
+
+        debug!("Checking repeatability: ({:.4}, {:.4})", x, y);
+
+        /// if the nozzle is centered, stop
         if x.abs() < self.options.auto_offset_settings.target_max_offset
             && y.abs() < self.options.auto_offset_settings.target_max_offset
         {
+            stop = true;
+        }
+
+        /// if the nozzle isn't centered, but the offset is too small to move, stop
+        if x.abs() < self.options.auto_offset_settings.resolution
+            && y.abs() < self.options.auto_offset_settings.resolution
+        {
+            stop = true;
+        }
+
+        if stop {
             if self.auto_offset.check_repeatability == 0 {
+                let t = self.auto_offset.auto_offset_type;
                 self.auto_offset.stop();
 
                 let Some(pos) = self.get_position() else {
@@ -392,13 +517,44 @@ impl App {
                     .repeatability
                     .push(((pos.0, pos.1), (x, y)));
 
-                self.auto_offset.process_repeatibility();
+                self.auto_offset
+                    .process_repeatibility(matches!(t, AutoOffsetType::HomingTest));
 
                 return;
             } else {
                 debug!("Found center, adding to repeatability data");
 
                 self.auto_offset.check_repeatability -= 1;
+
+                let now = std::time::SystemTime::now();
+                let now: chrono::DateTime<chrono::Utc> = now.into();
+                let now = now.format("%Y-%m-%d_%H-%M-%S");
+
+                let path_dir = format!(
+                    "data_output/screenshots_T{}_{}",
+                    self.auto_offset.current_tool, now
+                );
+
+                if !std::path::Path::new("data_output").exists() {
+                    std::fs::create_dir("data_output").unwrap_or_else(|_| {
+                        error!("Failed to create output directory: data_output");
+                    });
+                }
+
+                let path = format!("{}/{:>02}.jpg", path_dir, self.auto_offset.current_n,);
+
+                self.auto_offset.current_n += 1;
+
+                self.channel_to_vision
+                    .as_ref()
+                    .unwrap()
+                    .send(crate::vision::WebcamCommand::SaveScreenshot(
+                        None,
+                        Some(path),
+                    ))
+                    .unwrap_or_else(|_| {
+                        error!("Failed to send snapshot command to vision thread");
+                    });
 
                 let Some(pos) = self.get_position() else {
                     warn!("No position data available");
@@ -408,10 +564,29 @@ impl App {
                     .repeatability
                     .push(((pos.0, pos.1), (x, y)));
 
-                self.dropoff_tool();
-                self.pickup_tool(self.auto_offset.current_tool, true);
-                self.running_average.clear();
-                self.auto_offset.last_move = Instant::now();
+                match self.auto_offset.auto_offset_type {
+                    AutoOffsetType::RepeatabilityTest => {
+                        // self.dropoff_tool();
+                        self.move_to_position((30., 220.), true);
+                        self.pickup_tool(self.auto_offset.current_tool, true);
+                        self.running_average.clear();
+                        self.auto_offset.last_move =
+                            Instant::now() + std::time::Duration::from_secs(1);
+                    }
+                    AutoOffsetType::HomingTest => {
+                        let Some(cam_pos) = self.camera_pos else {
+                            warn!("No camera position data available");
+                            self.auto_offset.stop();
+                            return;
+                        };
+                        self.home_xy();
+                        self.move_to_position(cam_pos, true);
+                        self.running_average.clear();
+                        self.auto_offset.last_move =
+                            Instant::now() + std::time::Duration::from_secs(1);
+                    }
+                    _ => unreachable!(),
+                }
 
                 return;
             }
@@ -419,8 +594,27 @@ impl App {
 
         debug!("Moving to center: ({:.4}, {:.4})", x, y);
 
-        self.move_axis_relative(Axis::X, x, true);
-        self.move_axis_relative(Axis::Y, y, true);
+        if x.abs() > self.options.auto_offset_settings.target_max_offset
+            && x.abs() > self.options.auto_offset_settings.resolution
+        {
+            if x.abs() < 0.02 {
+                debug!("Fine tuning X axis: ({:.5})", x / 4.);
+                self.move_axis_relative(Axis::X, x / 4., true);
+            } else {
+                self.move_axis_relative(Axis::X, x, true);
+            }
+        }
+
+        if y.abs() > self.options.auto_offset_settings.target_max_offset
+            && y.abs() > self.options.auto_offset_settings.resolution
+        {
+            if y.abs() < 0.02 {
+                debug!("Fine tuning Y axis: ({:.5})", y / 4.);
+                self.move_axis_relative(Axis::Y, y / 4., true);
+            } else {
+                self.move_axis_relative(Axis::Y, y, true);
+            }
+        }
 
         self.auto_offset.last_move = Instant::now();
     }

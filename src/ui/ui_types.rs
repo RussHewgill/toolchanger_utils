@@ -42,7 +42,7 @@ pub struct App {
     #[serde(skip)]
     pub webcam_settings_mutex: Arc<std::sync::Mutex<crate::vision::VisionSettings>>,
 
-    pub options: crate::options::Options,
+    pub options: crate::ui::options::Options,
 
     #[serde(skip)]
     // pub running_average: crate::vision::RunningAverage,
@@ -87,7 +87,10 @@ pub struct App {
     pub inbox: egui_inbox::UiInbox<crate::klipper_async::KlipperMessage>,
 
     #[serde(skip)]
-    pub klipper_status: Option<Arc<tokio::sync::Mutex<crate::klipper_async::KlipperStatus>>>,
+    pub klipper_status: Option<Arc<tokio::sync::RwLock<crate::klipper_async::KlipperStatus>>>,
+
+    #[serde(skip)]
+    pub klipper_status_frame: Option<crate::klipper_async::KlipperStatus>,
 
     #[serde(skip)]
     /// for display only, not for sending to klipper

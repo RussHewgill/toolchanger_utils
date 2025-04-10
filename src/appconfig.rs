@@ -5,7 +5,7 @@ use tracing::{debug, error, info, trace, warn};
 
 use serde::{Deserialize, Serialize};
 
-use crate::options::Options;
+use crate::ui::options::Options;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]

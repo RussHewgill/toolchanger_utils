@@ -28,7 +28,8 @@ impl Default for Options {
             camera_size: (1280., 800.),
             camera_scale: 0.5,
 
-            z_height: 33.51,
+            // z_height: 33.51,
+            z_height: 33.2,
 
             auto_offset_settings: AutoOffsetSettings::default(),
         }
@@ -49,6 +50,17 @@ impl App {
         //     ui.label("Camera Index:");
         //     ui.text_edit_singleline(&mut self.options.camera_index);
         // });
+
+        ui.separator();
+
+        ui.horizontal(|ui| {
+            ui.label("Z height: ");
+            ui.add(
+                egui::DragValue::new(&mut self.options.z_height)
+                    .range(10.0..=40.0)
+                    .speed(0.1),
+            );
+        });
 
         ui.separator();
 

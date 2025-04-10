@@ -17,10 +17,10 @@ pub enum NozzlePosition {
     NotVisible,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WebcamCommand {
     ConnectCamera(usize),
-    SaveScreenshot(Option<(f64, f64)>),
+    SaveScreenshot(Option<(f64, f64)>, Option<String>),
     SetCameraControl(CameraControl),
     GetCameraFormats,
     SetCameraFormat(CameraFormat),

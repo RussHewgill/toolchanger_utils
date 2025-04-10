@@ -10,7 +10,7 @@ use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
-use tokio::{net::TcpStream, sync::Mutex, time::Instant};
+use tokio::{net::TcpStream, sync::RwLock, time::Instant};
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use url::Url;
 
@@ -29,6 +29,9 @@ pub enum KlipperCommand {
     DropTool,
     AdjustToolOffset(u32, Axis, f64),
     GetToolOffsets,
+    DisableMotors,
+    WaitForMoves,
+    Dwell(u32),
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -51,7 +54,7 @@ pub struct KlipperConn {
     >,
     // ws_read: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     // current_status: KlipperStatus,
-    current_status: Arc<Mutex<KlipperStatus>>,
+    current_status: Arc<RwLock<KlipperStatus>>,
     inbox: UiInboxSender<KlipperMessage>,
     // inbox_position: UiInboxSender<(f64, f64, f64)>,
     channel_from_ui: tokio::sync::mpsc::Receiver<KlipperCommand>,
@@ -66,6 +69,8 @@ pub struct KlipperStatus {
     // pub active_tool: Option<u32>,
     pub homed_axes: (bool, bool, bool),
     pub vars: Option<(Instant, serde_json::Value)>,
+    pub resolution: f64,
+    pub motors_enabled: (bool, bool, bool),
 }
 
 impl Default for KlipperStatus {
@@ -77,6 +82,8 @@ impl Default for KlipperStatus {
             // active_tool: None,
             homed_axes: (false, false, false),
             vars: None,
+            resolution: 0.0,
+            motors_enabled: (false, false, false),
         }
     }
 }
@@ -104,6 +111,25 @@ impl KlipperStatus {
         Ok(())
     }
 
+    fn _update_resolution(&mut self, stepper_x: &serde_json::Value) -> Result<()> {
+        let rot_dist = stepper_x["rotation_distance"]
+            .as_str()
+            .ok_or(anyhow!("Failed to parse rotation_distance"))?
+            .parse::<f64>()?;
+        let microsteps = stepper_x["microsteps"]
+            .as_str()
+            .ok_or(anyhow!("Failed to parse microsteps"))?
+            .parse::<f64>()?;
+        let steps_per_rot = stepper_x["full_steps_per_rotation"]
+            .as_str()
+            .ok_or(anyhow!("Failed to parse full_steps_per_rotation"))?
+            .parse::<f64>()?;
+
+        self.resolution = rot_dist / (microsteps * steps_per_rot);
+
+        Ok(())
+    }
+
     fn update(
         &mut self,
         sender: &UiInboxSender<KlipperMessage>,
@@ -111,12 +137,36 @@ impl KlipperStatus {
     ) -> Result<()> {
         // debug!("updating status");
 
+        if let Some(stepper_x) = json.pointer("/result/status/configfile/config/stepper_x") {
+            self._update_resolution(&stepper_x)?;
+        }
+
         if let Some(pos) = json.pointer("/result/status/gcode_move/gcode_position") {
             self._update_pos(sender, pos)?;
         }
 
         if let Some(pos) = json.pointer("/result/status/toolhead/position") {
             self._update_pos(sender, pos)?;
+        }
+
+        let steppers = json.pointer("/result/status/stepper_enable/steppers");
+        let steppers = json
+            .pointer("/params/0/stepper_enable/steppers")
+            .or(steppers);
+
+        if let Some(steppers) = steppers {
+            if let Some(x) = steppers.get("stepper_x").and_then(|v| v.as_bool()) {
+                // debug!("stepper_x: {}", x);
+                self.motors_enabled.0 = x;
+            }
+            if let Some(y) = steppers.get("stepper_y").and_then(|v| v.as_bool()) {
+                // debug!("stepper_y: {}", y);
+                self.motors_enabled.1 = y;
+            }
+            if let Some(z) = steppers.get("stepper_z").and_then(|v| v.as_bool()) {
+                // debug!("stepper_z: {}", z);
+                self.motors_enabled.2 = z;
+            }
         }
 
         if let Some(vars) = json.pointer("/result/status/save_variables/variables") {
@@ -167,7 +217,7 @@ impl KlipperConn {
         inbox: UiInboxSender<KlipperMessage>,
         // inbox_position: UiInboxSender<(f64, f64, f64)>,
         rx: tokio::sync::mpsc::Receiver<KlipperCommand>,
-        tx_status: tokio::sync::oneshot::Sender<Arc<Mutex<KlipperStatus>>>,
+        tx_status: tokio::sync::oneshot::Sender<Arc<RwLock<KlipperStatus>>>,
     ) -> Result<Self> {
         let url = format!("ws://{}:7125/websocket", url.host_str().unwrap());
 
@@ -178,8 +228,7 @@ impl KlipperConn {
 
         // let (tx, rx) = crossbeam_channel::bounded(1);
 
-        // let current_status = Arc<Mutex< KlipperStatus::default()>>;
-        let current_status = Arc::new(Mutex::new(KlipperStatus::default()));
+        let current_status = Arc::new(RwLock::new(KlipperStatus::default()));
 
         let status2 = current_status.clone();
         let inbox2 = inbox.clone();
@@ -199,13 +248,27 @@ impl KlipperConn {
             id: 1,
         };
 
-        out.subscribe_to_defaults().await?;
+        out.init().await?;
 
         Ok(out)
     }
 
+    async fn init(&mut self) -> Result<()> {
+        self.subscribe_to_defaults().await?;
+
+        self.query_object("configfile")
+            .await
+            .map_err(|e| anyhow!("Failed to query object: {:?}", e))?;
+
+        self.query_object("stepper_enable")
+            .await
+            .map_err(|e| anyhow!("Failed to query object: {:?}", e))?;
+
+        Ok(())
+    }
+
     async fn listener(
-        status: Arc<Mutex<KlipperStatus>>,
+        status: Arc<RwLock<KlipperStatus>>,
         inbox: UiInboxSender<KlipperMessage>,
         mut ws_read: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     ) {
@@ -250,12 +313,44 @@ impl KlipperConn {
                     "toolhead": ["position", "status", "homed_axes"],
                     // "motion_report": null,
                     // "idle_timeout": null,
+                    "stepper_enable": null,
                 }
             },
             "id": self.get_id(),
         })
         .to_string();
 
+        self.ws_write
+            .send(tokio_tungstenite::tungstenite::Message::Text(msg.into()))
+            .await?;
+        Ok(())
+    }
+
+    pub async fn query_object(&mut self, object: &str) -> Result<()> {
+        let msg = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "printer.objects.query",
+            "params": {
+                "objects": {
+                    object: null,
+                }
+            },
+            "id": self.get_id(),
+        })
+        .to_string();
+        self.ws_write
+            .send(tokio_tungstenite::tungstenite::Message::Text(msg.into()))
+            .await?;
+        Ok(())
+    }
+
+    pub async fn list_objects(&mut self) -> Result<()> {
+        let msg = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "printer.objects.list",
+            "id": self.get_id(),
+        })
+        .to_string();
         self.ws_write
             .send(tokio_tungstenite::tungstenite::Message::Text(msg.into()))
             .await?;
@@ -273,8 +368,16 @@ impl KlipperConn {
                 // Some(Ok(msg)) = self.ws_read.next() => {
                 //     self.handle_message(msg).unwrap();
                 // }
-                Some(cmd) = self.channel_from_ui.recv() => {
-                    self.handle_command(cmd).await.unwrap();
+                cmd = self.channel_from_ui.recv() => {
+                    match cmd {
+                        None => {
+                            debug!("Channel closed");
+                            return Ok(());
+                        }
+                        Some(cmd) => {
+                            self.handle_command(cmd).await.unwrap();
+                        }
+                    }
                 }
             };
         }
@@ -285,7 +388,6 @@ impl KlipperConn {
     async fn handle_command(&mut self, cmd: KlipperCommand) -> Result<()> {
         match cmd {
             KlipperCommand::MoveToPosition(pos, bounce) => self.move_to_position(pos, bounce).await,
-            // KlipperCommand::MovePositionRelative(_, _) => todo!(),
             KlipperCommand::MoveAxisRelative(axis, amount, bounce) => {
                 self.move_axis_relative(axis, amount, bounce).await
             }
@@ -299,12 +401,15 @@ impl KlipperConn {
             KlipperCommand::DropTool => self.dropoff_tool().await,
             KlipperCommand::AdjustToolOffset(_, axis, _) => todo!(),
             KlipperCommand::GetToolOffsets => self.get_offsets().await,
+            KlipperCommand::DisableMotors => self.disable_motors().await,
+            KlipperCommand::WaitForMoves => self.wait_for_moves().await,
+            KlipperCommand::Dwell(ms) => self.dwell(ms).await,
         }
     }
 
     // #[cfg(feature = "nope")]
     async fn handle_message(
-        status: &Mutex<KlipperStatus>,
+        status: &RwLock<KlipperStatus>,
         inbox: &UiInboxSender<KlipperMessage>,
         msg: tokio_tungstenite::tungstenite::Message,
     ) -> Result<()> {
@@ -326,12 +431,19 @@ impl KlipperConn {
         if method == "notify_proc_stat_update" {
             // debug!("Received: {}", serde_json::to_string_pretty(&json).unwrap());
             // debug!("got notify_proc_stat_update");
-            return Ok(());
+
+            if let Some(params) = json.pointer("params/0") {
+                if params.get("stepper_enabled").is_some() {
+                    trace!("got msg: {}", serde_json::to_string_pretty(&json).unwrap());
+                }
+            }
+
+            // return Ok(());
+        } else {
+            trace!("got msg: {}", serde_json::to_string_pretty(&json).unwrap());
         }
 
-        trace!("got msg: {}", serde_json::to_string_pretty(&json).unwrap());
-
-        if let Err(e) = status.lock().await.update(&inbox, &json) {
+        if let Err(e) = status.write().await.update(&inbox, &json) {
             error!("Failed to update status: {}", e);
         }
 

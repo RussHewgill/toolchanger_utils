@@ -45,7 +45,9 @@ pub fn spawn_locator_thread(
 
                         //
                     }
-                    WebcamCommand::SaveScreenshot(_) => {}
+                    WebcamCommand::SaveScreenshot(_, _) => {
+                        todo!("Save screenshot command received in camera thread");
+                    }
                     WebcamCommand::SetCameraControl(camera_control) => {}
                     WebcamCommand::GetCameraFormats => {
                         if let Err(e) = get_camera_formats(index, &channel_to_ui) {
@@ -197,7 +199,7 @@ fn _spawn_camera_thread(
     let mut n = 0;
 
     let mut commands: VecDeque<WebcamCommand> = VecDeque::new();
-    let mut screenshots = VecDeque::new();
+    let mut screenshots: VecDeque<(Option<(f64, f64)>, Option<String>)> = VecDeque::new();
 
     let mut saved_targets = {
         let path = "test_images/saved_targets.toml";
@@ -218,8 +220,8 @@ fn _spawn_camera_thread(
                 WebcamCommand::ConnectCamera(_) => {
                     error!("ConnectCamera command received in camera thread");
                 }
-                WebcamCommand::SaveScreenshot(s) => {
-                    screenshots.push_back(s);
+                WebcamCommand::SaveScreenshot(s, p) => {
+                    screenshots.push_back((s, p));
                 }
                 WebcamCommand::SetCameraControl(cmd) => {
                     let c = cmd.to_control();
@@ -264,6 +266,7 @@ fn _spawn_camera_thread(
             .decode_image_to_buffer::<RgbFormat>(&mut buffer)
             .unwrap();
 
+        #[cfg(feature = "nope")]
         if let Some(cmd) = screenshots.pop_front() {
             match cmd {
                 None => {
@@ -280,7 +283,7 @@ fn _spawn_camera_thread(
 
                     buffer.save(path).unwrap();
                 }
-                Some(pos) => {
+                Some((pos, None)) => {
                     let mut path = format!("test_images/frame_{:0>4}.jpg", saved_targets.index);
                     debug!("Saving image to {}", path);
                     let path = std::path::PathBuf::from(path);
@@ -294,6 +297,23 @@ fn _spawn_camera_thread(
                     let path = "test_images/saved_targets.toml";
                     let s = toml::to_string(&saved_targets).unwrap();
                     std::fs::write(path, s).unwrap();
+                }
+                Some((pos, Some(path))) => {
+                    unimplemented!()
+                }
+            }
+        }
+
+        if let Some(cmd) = screenshots.pop_front() {
+            match cmd {
+                (None, None) => {
+                    warn!("Screenshot command received with no path or target");
+                }
+                (Some(pos), None) => {
+                    warn!("TODO: save screenshot with target");
+                }
+                (_, Some(path)) => {
+                    warn!("TODO: save screenshot with target and path");
                 }
             }
         }

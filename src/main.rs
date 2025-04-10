@@ -12,7 +12,6 @@ pub mod appconfig;
 pub mod klipper_async;
 pub mod klipper_protocol;
 pub mod logging;
-pub mod options;
 pub mod saved_data;
 pub mod tests;
 pub mod tuning;
@@ -42,6 +41,69 @@ fn main() -> opencv::Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "nope")]
+fn main() -> Result<()> {
+    logging::init_logs();
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .danger_accept_invalid_certs(true)
+        .build()
+        .context("Failed to build HTTP client")?;
+
+    let url = url::Url::parse("http://192.168.0.245").unwrap();
+
+    let url = url.join("/printer/objects/query")?;
+    // let url = url.join("/printer/objects/list")?;
+
+    let map = serde_json::json!({
+        "objects": {
+            "configfile": null
+            // "toolhead": null
+        }
+    });
+
+    let res = client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .json(&map)
+        .send()
+        .context("Failed to send request")?;
+
+    let json = res
+        .json::<serde_json::Value>()
+        .context("Failed to parse response")?;
+
+    let stepper_x = json
+        .pointer("/result/status/configfile/config/stepper_x")
+        .unwrap();
+
+    debug!(
+        "Response: {}",
+        serde_json::to_string_pretty(&stepper_x).unwrap()
+    );
+
+    let rot_dist = stepper_x["rotation_distance"]
+        .as_str()
+        .unwrap()
+        .parse::<f64>()?;
+    let microsteps = stepper_x["microsteps"].as_str().unwrap().parse::<f64>()?;
+    let steps_per_rot = stepper_x["full_steps_per_rotation"]
+        .as_str()
+        .unwrap()
+        .parse::<f64>()?;
+
+    debug!("Rotational distance: {}", rot_dist);
+    debug!("Microsteps: {}", microsteps);
+    debug!("Steps per rotation: {}", steps_per_rot);
+
+    let resolution = rot_dist / (microsteps * steps_per_rot);
+
+    debug!("Resolution: {}", resolution);
+
+    Ok(())
+}
+
 /// Async klipper tests
 #[cfg(feature = "nope")]
 #[tokio::main]
@@ -57,15 +119,20 @@ async fn main() -> Result<()> {
 
     let (tx, rx) = tokio::sync::mpsc::channel(1);
 
-    tx.send(klipper_async::KlipperCommand::MoveToPosition(
-        (150., 150., 40.),
-        Some(0.5),
-    ))
-    .await?;
+    // tx.send(klipper_async::KlipperCommand::MoveToPosition(
+    //     (150., 150., 40.),
+    //     Some(0.5),
+    // ))
+    // .await?;
 
-    let mut klipper = klipper_async::KlipperConn::new(url, inbox.sender(), rx).await?;
+    let (tx2, mut rx2) = tokio::sync::oneshot::channel();
 
-    klipper.subscribe_to_defaults().await?;
+    let mut klipper = klipper_async::KlipperConn::new(url, inbox.sender(), rx, tx2).await?;
+
+    // klipper.subscribe_to_defaults().await?;
+
+    // klipper.list_objects().await?;
+    klipper.query_object("stepper_x").await?;
 
     klipper.run().await?;
 
@@ -74,8 +141,10 @@ async fn main() -> Result<()> {
 
 /// Async klipper tests
 #[cfg(feature = "nope")]
-// #[tokio::main]
+#[tokio::main]
 async fn main() -> Result<()> {
+    logging::init_logs();
+
     use futures_util::{SinkExt, StreamExt};
     use tokio::io::AsyncBufReadExt;
     use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
@@ -85,18 +154,20 @@ async fn main() -> Result<()> {
     let url = "ws://192.168.0.245:7125/websocket";
 
     let (ws_stream, _) = connect_async(url).await?;
-    println!("Connected to {}", url);
+    debug!("Connected to {}", url);
 
     // Split the WebSocket stream into write and read halves
     let (mut write, mut read) = ws_stream.split();
+    debug!("Split WebSocket stream");
 
     let msg = serde_json::json!({
         "jsonrpc": "2.0",
         "method": "printer.objects.subscribe",
         "params": {
             "objects": {
-                "gcode_move": null,
-                "toolhead": ["position", "status"]
+                // "gcode_move": null,
+                // "toolhead": ["position", "status"]
+                "stepper_enable": null,
             }
         },
         "id": 1
@@ -107,10 +178,63 @@ async fn main() -> Result<()> {
         eprintln!("Error sending message: {}", e);
     }
 
+    // async fn send(
+    //     mut write: futures_util::stream::SplitSink<
+    //         tokio_tungstenite::WebSocketStream<
+    //             tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    //         >,
+    //         tokio_tungstenite::tungstenite::Message,
+    //     >,
+    // ) {
+    //     let mut id = 2;
+    //     debug!("Spawned send task");
+
+    //     loop {
+    //         debug!("Sending message");
+    //         let msg = serde_json::json!({
+    //             "jsonrpc": "2.0",
+    //             "method": "printer.objects.query",
+    //             "params": {
+    //                 "objects": {
+    //                     // "gcode_move": null,
+    //                     // "toolhead": ["position", "status"]
+    //                     "stepper_enable": null,
+    //                 }
+    //             },
+    //             "id": id,
+    //         })
+    //         .to_string();
+
+    //         id += 1;
+
+    //         if let Err(e) = write.send(Message::Text(msg.into())).await {
+    //             eprintln!("Error sending message: {}", e);
+    //         }
+
+    //         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    //     }
+    // }
+
+    // debug!("Spawning send task");
+    // tokio::spawn(send(write));
+    // debug!("done");
+
     // Handle incoming messages
     while let Some(message) = read.next().await {
         match message {
-            Ok(Message::Text(text)) => println!("Received: {}\n", text),
+            Ok(Message::Text(text)) => {
+                // let msg1 = text.into_text().unwrap();
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(text.as_str()) {
+                    //
+
+                    let method = json["method"].as_str().unwrap_or("");
+
+                    if method != "notify_proc_stat_update" {
+                        debug!("Received: {}", serde_json::to_string_pretty(&json).unwrap());
+                    }
+                }
+                // println!("Received: {}\n", text),
+            }
             Ok(Message::Close(_)) => {
                 println!("Connection closed");
                 break;

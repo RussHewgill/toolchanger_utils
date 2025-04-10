@@ -69,3 +69,6 @@ futures-util = { version = "0.3.28", default-features = false, features = [
     "sink",
     "std",
 ] }
+parking_lot = "0.12.3"
+chrono = "0.4.40"
+num = "0.4.3"

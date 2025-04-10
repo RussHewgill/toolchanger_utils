@@ -50,7 +50,7 @@ impl App {
             return None;
         };
 
-        let pos = s.blocking_lock().position;
+        let pos = s.blocking_read().position;
 
         pos
     }
@@ -77,6 +77,10 @@ impl App {
                 None
             },
         ));
+    }
+
+    pub fn disable_motors(&mut self) {
+        self.send_klipper(KlipperCommand::DisableMotors);
     }
 
     #[cfg(feature = "nope")]

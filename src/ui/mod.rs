@@ -2,8 +2,10 @@
 pub mod auto_offset;
 pub mod data_labeling;
 pub mod klipper_ui;
+pub mod options;
 pub mod preprocess_ui;
 pub mod ui_types;
+pub mod utils;
 pub mod webcam_controls;
 
 use tracing_subscriber::field::debug;
@@ -12,7 +14,7 @@ use ui_types::*;
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use tracing::{debug, error, info, trace, warn};
 
-use egui::{Button, Color32, Label, RichText, Vec2};
+use egui::{Align, Button, Color32, Label, Layout, RichText, Vec2};
 use egui_extras::StripBuilder;
 
 use crate::vision::{VisionSettings, WebcamMessage};
@@ -149,13 +151,60 @@ impl App {
             if ui.add(button).clicked() {
                 if let Some((x, y, _)) = self.get_position() {
                     if let Some(t) = self.active_tool {
-                        debug!("Starting repeatability test");
-                        if let Some((x, y, _)) = self.get_position() {
-                            self.auto_offset.start_repeatability((x, y), t as i32);
+                        match self.auto_offset.auto_offset_type() {
+                            auto_offset::AutoOffsetType::RepeatabilityTest => {
+                                self.auto_offset.stop()
+                            }
+                            _ => {
+                                debug!("Starting repeatability test");
+                                if let Some((x, y, _)) = self.get_position() {
+                                    self.auto_offset.start_repeatability((x, y), t as i32);
+                                }
+                            }
                         }
                     }
                 }
             }
+
+            let button = egui::Button::new(RichText::new("Homing Test").size(16.));
+            let button = if matches!(
+                self.auto_offset.auto_offset_type(),
+                crate::ui::auto_offset::AutoOffsetType::HomingTest
+            ) {
+                button.fill(Color32::from_rgb(50, 158, 244))
+            } else {
+                button
+            };
+            if ui.add(button).clicked() {
+                if let Some((x, y, _)) = self.get_position() {
+                    if let Some(t) = self.active_tool {
+                        debug!("Starting repeatability test");
+                        if let Some((x, y, _)) = self.get_position() {
+                            self.auto_offset.start_homing((x, y), t as i32);
+                        }
+                    }
+                }
+            }
+
+            ui.label("Repeatability Count: ");
+            let resp = ui.add(
+                egui::DragValue::new(self.auto_offset.repeatability_count_mut())
+                    .speed(0.5)
+                    .range(0..=20),
+            );
+            self::utils::make_scrollable(
+                ui,
+                resp,
+                self.auto_offset.repeatability_count_mut(),
+                1,
+                // Some(0),
+            );
+
+            // let x = self.auto_offset.repeatability_count_mut();
+            // if x > 0 {
+            //     ui.label(format!("Tests remaining: {}", x));
+            // }
+
             //
         });
 
@@ -185,6 +234,23 @@ impl App {
 
             if ui.button(RichText::new("Home XY").size(16.)).clicked() {
                 self.home_xy();
+            }
+
+            let enabled = self
+                .klipper_status_frame
+                .as_ref()
+                .map(|s| s.motors_enabled.0 || s.motors_enabled.1 || s.motors_enabled.2)
+                .unwrap_or(false);
+
+            if ui
+                .add_enabled(
+                    enabled,
+                    egui::Button::new(RichText::new("Disable Motors").size(16.)),
+                )
+                .clicked()
+            {
+                // self.home_z();
+                self.disable_motors();
             }
             //
         });
@@ -266,24 +332,55 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.label(
                             RichText::new(format!(
-                                "Camera Position: ({:.2}, {:.2})",
+                                "Camera Position: ({:.4}, {:.4})",
                                 camera_x, camera_y
                             ))
                             .size(16.),
                         );
 
                         let (offset_x, offset_y, _) = if let Some(t) = self.active_tool {
-                            self.tool_offsets[t]
+                            self.tool_offsets.get(t).copied().unwrap_or_else(|| {
+                                error!("Failed to get tool offsets");
+                                (0., 0., 0.)
+                            })
                         } else {
                             (0., 0., 0.)
                         };
 
-                        let x = x - camera_x - offset_x;
-                        let y = y - camera_y - offset_y;
+                        let cx = x - camera_x - offset_x;
+                        let cy = y - camera_y - offset_y;
                         ui.label(
-                            RichText::new(format!("Diff from Camera: {:.3}, {:.3}", x, y))
-                                .size(16.),
+                            RichText::new(format!(
+                                "Diff from Camera (GCode): {:.4}, {:.4}",
+                                cx, cy
+                            ))
+                            .size(16.),
                         );
+
+                        #[cfg(feature = "nope")]
+                        if let Some(guess) = self.running_average.current_guess() {
+                            let (gx, gy, _) = guess;
+
+                            debug!("Guess: ({:.4}, {:.4})", gx, gy);
+
+                            let gx = gx - camera_x - offset_x;
+                            let gy = gy - camera_y - offset_y;
+
+                            ui.label(
+                                RichText::new(format!(
+                                    "Diff from Camera (Located): {:.4}, {:.4}",
+                                    gx, gy
+                                ))
+                                .size(16.),
+                            );
+                        } else {
+                            ui.label(
+                                RichText::new(format!(
+                                    "Diff from Camera (Located): -.----, -.----"
+                                ))
+                                .size(16.),
+                            );
+                        }
                     });
                 } else {
                     ui.label(RichText::new(format!("No Camera Position")).size(16.));
@@ -378,6 +475,43 @@ impl App {
             return;
         };
 
+        #[cfg(feature = "nope")]
+        ui.horizontal(|ui| {
+            let layout = Layout::default()
+                .with_main_justify(true)
+                .with_cross_justify(true)
+                .with_cross_align(Align::Center)
+                .with_main_align(Align::Center)
+                // .with_cross_align(egui::Align::Center)
+                ;
+
+            // let layout = Layout::left_to_right(Align::Center);
+
+            ui.with_layout(layout, |ui| {
+                // self.position_labels(ui);
+                // ui.group(|ui| {
+                //     for i in 0..3 {
+                //     }
+                // });
+
+                {
+                    StripBuilder::new(ui)
+                        .sizes(egui_extras::Size::exact(100.), 3)
+                        .horizontal(|mut strip| {
+                            strip.cell(|ui| {
+                                ui.label(RichText::new(format!("X: {}", 0)).size(18.).strong());
+                            });
+                            strip.cell(|ui| {
+                                ui.label(RichText::new(format!("Y: {}", 1)).size(18.).strong());
+                            });
+                            strip.cell(|ui| {
+                                ui.label(RichText::new(format!("Z: {}", 2)).size(18.).strong());
+                            });
+                        });
+                }
+            });
+        });
+
         ui.horizontal(|ui| {
             self.position_labels(ui);
         });
@@ -385,16 +519,26 @@ impl App {
         ui.group(|ui| {
             ui.set_height(100.);
 
-            StripBuilder::new(ui)
-                .sizes(egui_extras::Size::relative(0.5), 2)
-                .vertical(|mut strip| {
-                    strip.strip(|builder| {
-                        self.movement_buttons(builder, Axis::X, (x, y, z));
+            let layout = Layout::default()
+                .with_cross_justify(true)
+                // .with_cross_align(egui::Align::Center)
+                ;
+
+            ui.with_layout(layout, |ui| {
+                StripBuilder::new(ui)
+                    .sizes(egui_extras::Size::relative(0.33), 3)
+                    .vertical(|mut strip| {
+                        strip.strip(|builder| {
+                            self.movement_buttons(builder, Axis::X, (x, y, z));
+                        });
+                        strip.strip(|builder| {
+                            self.movement_buttons(builder, Axis::Y, (x, y, z));
+                        });
+                        strip.strip(|builder| {
+                            self.movement_buttons(builder, Axis::Z, (x, y, z));
+                        });
                     });
-                    strip.strip(|builder| {
-                        self.movement_buttons(builder, Axis::Y, (x, y, z));
-                    });
-                });
+            });
         });
     }
 
@@ -422,17 +566,11 @@ impl App {
                             .strong(),
                     );
 
-                    let layout = egui::Layout::right_to_left(egui::Align::Center);
+                    // let layout = egui::Layout::right_to_left(egui::Align::Center);
 
-                    ui.with_layout(layout, |ui| {
-                        ui.label(RichText::new(format!("{:.4}", pos)).strong().size(18.));
-                    });
-                    // let mut s =
-                    // ui.add(
-                    //     egui::TextEdit::singleline(&mut s)
-                    //         .interactive(false)
-                    //         .horizontal_align(egui::Align::Max),
-                    // );
+                    // ui.with_layout(layout, |ui| {
+                    ui.label(RichText::new(format!("{:.4}", pos)).strong().size(18.));
+                    // });
                 });
             });
         }
@@ -459,9 +597,13 @@ impl App {
         axis: Axis,
         (x, y, z): (f64, f64, f64),
     ) {
-        let steps = [0.01, 0.1, 0.5, 1., 5.];
+        let steps = match axis {
+            Axis::Z => [0.01, 0.02, 0.05, 0.1, 0.5],
+            // _ => [0.01, 0.1, 0.5, 1., 5.],
+            _ => [0.005, 0.01, 0.1, 0.5, 5.],
+        };
         // let steps = [0.01, 0.1, 5., 10., 15.];
-        let button_width = 50.;
+        let button_width = 60.;
 
         let pos = match axis {
             Axis::X => x,
@@ -918,7 +1060,10 @@ impl App {
                 self.channel_to_vision
                     .as_mut()
                     .unwrap()
-                    .try_send(crate::vision::WebcamCommand::SaveScreenshot(Some((x, y))))
+                    .try_send(crate::vision::WebcamCommand::SaveScreenshot(
+                        Some((x, y)),
+                        None,
+                    ))
                     .unwrap_or_else(|e| {
                         error!("Failed to send screenshot command: {}", e);
                     });
@@ -1017,6 +1162,8 @@ impl eframe::App for App {
 
         /// Init klipper
         if !self.klipper_started {
+            // self.errors.push("Starting klipper".to_string());
+
             debug!("starting klipper thread");
             let url = url::Url::parse(&format!("{}", self.options.printer_url)).unwrap();
             let url = url::Url::parse(&format!("ws://{}:7125/websocket", url.host_str().unwrap()))
@@ -1069,7 +1216,7 @@ impl eframe::App for App {
         while let Some(msg) = self.inbox.read_without_ctx().next() {
             match msg {
                 crate::klipper_async::KlipperMessage::Position(pos) => self.last_position = pos,
-                crate::klipper_async::KlipperMessage::AxesHomed((x, y, z)) => todo!(),
+                // crate::klipper_async::KlipperMessage::AxesHomed((x, y, z)) => todo!(),
                 crate::klipper_async::KlipperMessage::KlipperError(e) => {
                     error!("Klipper error: {}", e);
                     self.errors.push(e.to_string());
@@ -1077,7 +1224,21 @@ impl eframe::App for App {
                 crate::klipper_async::KlipperMessage::ToolOffsets(offsets) => {
                     self.tool_offsets = offsets
                 }
+                _ => {
+                    debug!("Unhandled message: {:?}", msg);
+                }
             }
+        }
+
+        // if let Some(status) = self.klipper_status.as_ref()
+        if let Some(status) = self.klipper_status.as_ref() {
+            if let Ok(status) = status.try_read() {
+                self.klipper_status_frame = Some(status.clone());
+            } else {
+                self.klipper_status_frame = None;
+            }
+        } else {
+            self.klipper_status_frame = None;
         }
 
         if let Some(rx) = self.channel_to_ui.as_mut() {
@@ -1125,15 +1286,44 @@ impl eframe::App for App {
         match self.current_tab {
             Tab::Webcam => {
                 // #[cfg(feature = "nope")]
-                egui::SidePanel::right("rigth")
+                egui::SidePanel::right("right")
                     .resizable(false)
                     .default_width(400.)
                     .show(ctx, |ui| {
-                        // let Some(offsets) = self.tool_offsets else {
-                        //     ui.label("No tool offsets");
-                        //     return;
-                        // };
+                        // Let's show errors at the top of the panel
+                        if !self.errors.is_empty() {
+                            ui.heading("Errors");
+                            ui.horizontal(|ui| {
+                                if ui.button("Clear All").clicked() {
+                                    self.errors.clear();
+                                }
 
+                                let error_count = self.errors.len();
+                                ui.label(format!(
+                                    "({} error{})",
+                                    error_count,
+                                    if error_count == 1 { "" } else { "s" }
+                                ));
+                            });
+
+                            // Create a scrollable area for errors that won't take over the whole panel
+                            egui::ScrollArea::vertical()
+                                .max_height(200.0)
+                                .show(ui, |ui| {
+                                    // Display errors in reverse order (newest first)
+                                    for error in self.errors.iter().rev() {
+                                        ui.label(
+                                            egui::RichText::new(error)
+                                                .color(egui::Color32::from_rgb(255, 100, 100)),
+                                        );
+                                        ui.separator();
+                                    }
+                                });
+
+                            ui.separator();
+                        }
+
+                        // Original tool offsets section
                         if self.tool_offsets.is_empty() {
                             ui.label("No tool offsets");
                             return;
@@ -1145,19 +1335,8 @@ impl eframe::App for App {
                             ui.label(format!("Tool {} offsets:", t));
                             ui.label(format!("X: {:.3}", x));
                             ui.label(format!("Y: {:.3}", y));
-
                             ui.separator();
                         }
-
-                        // ui.label("Errors");
-                        // if ui.button("Clear").clicked() {
-                        //     self.errors.clear();
-                        // }
-                        // ui.group(|ui| {
-                        //     for error in &self.errors {
-                        //         ui.label(error);
-                        //     }
-                        // })
                     });
 
                 egui::TopBottomPanel::bottom("bottom")
@@ -1188,7 +1367,9 @@ impl eframe::App for App {
                     .resizable(false)
                     .default_height(600.)
                     .show(ctx, |ui| {
+                        // ui.vertical_centered(|ui| {
                         self.movement_controls(ui);
+                        // });
                     });
 
                 egui::CentralPanel::default().show(ctx, |ui| {
