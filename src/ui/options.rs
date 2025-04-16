@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use tracing::{debug, error, info, trace, warn};
 
-use crate::ui::{auto_offset::AutoOffsetSettings, ui_types::App};
+use crate::ui::{auto_offset_types::AutoOffsetSettings, ui_types::App};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Options {

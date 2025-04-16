@@ -313,7 +313,9 @@ fn _spawn_camera_thread(
                     warn!("TODO: save screenshot with target");
                 }
                 (_, Some(path)) => {
-                    warn!("TODO: save screenshot with target and path");
+                    debug!("Saving image to {}", path);
+                    let path = std::path::PathBuf::from(path);
+                    buffer.save(path).unwrap();
                 }
             }
         }

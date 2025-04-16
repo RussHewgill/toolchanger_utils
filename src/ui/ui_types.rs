@@ -57,7 +57,7 @@ pub struct App {
 
     #[serde(skip)]
     // pub auto_offset: Option<crate::ui::auto_offset::AutoOffset>,
-    pub auto_offset: crate::ui::auto_offset::AutoOffset,
+    pub auto_offset: crate::ui::auto_offset_types::AutoOffset,
 
     #[serde(skip)]
     pub data_labeling: crate::ui::data_labeling::DataLabeling,

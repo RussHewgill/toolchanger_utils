@@ -2,7 +2,10 @@ use egui::Slider;
 
 use crate::vision::{CameraControl, VisionSettings, WebcamCommand};
 
-use super::ui_types::App;
+use super::{
+    ui_types::App,
+    utils::{make_scrollable, make_scrollable_f},
+};
 
 impl App {
     #[cfg(feature = "nope")]
@@ -220,12 +223,13 @@ impl App {
         ui.end_row();
 
         ui.label("Camera Prescale");
-        ui.add(
+        let resp = ui.add(
             egui::DragValue::new(&mut self.vision_settings.prescale)
-                .speed(0.5)
+                .speed(0.25)
                 .fixed_decimals(2)
                 .range(1.0..=10.0),
         );
+        make_scrollable_f(ui, resp, &mut self.vision_settings.prescale, 0.5, 0.5, 3.0);
         ui.end_row();
 
         ui.separator();

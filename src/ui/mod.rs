@@ -1,5 +1,6 @@
 // pub mod app;
 pub mod auto_offset;
+pub mod auto_offset_types;
 pub mod data_labeling;
 pub mod klipper_ui;
 pub mod options;
