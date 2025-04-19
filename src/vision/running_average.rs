@@ -5,7 +5,6 @@ use std::collections::VecDeque;
 use std::time::Instant;
 
 use crate::{
-    klipper_protocol::KlipperProtocol,
     ui::{
         auto_offset::AutoOffsetType,
         ui_types::{App, Axis},
@@ -28,13 +27,14 @@ pub struct CircleAggregator {
 impl Default for CircleAggregator {
     fn default() -> Self {
         Self {
-            window_size: 30,
+            // window_size: 30,
+            window_size: 45,
             min_samples: 5,
             // high_threshold: 0.8,
             // low_threshold: 0.2,
             sum: (0., 0., 0.),
             sum_sq: (0., 0., 0.),
-            buffer: VecDeque::with_capacity(30),
+            buffer: VecDeque::with_capacity(120),
             valid: 0,
         }
     }

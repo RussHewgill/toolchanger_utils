@@ -5,7 +5,9 @@ use egui::RichText;
 use egui_extras::Column;
 use std::time::Instant;
 
-use super::auto_offset::AutoOffsetType;
+use crate::ui::ui_types::Axis;
+
+use super::{auto_offset::AutoOffsetType, ui_types::App};
 
 #[derive(Debug, Clone)]
 pub struct AutoOffset {
@@ -21,6 +23,8 @@ pub struct AutoOffset {
 
     /// (position, guessed offset from center)
     pub(super) repeatability: Vec<((f64, f64), (f64, f64))>,
+
+    pub(super) offsets: Vec<Vec<((f64, f64), (f64, f64))>>,
 }
 
 // #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -34,6 +38,7 @@ pub struct AutoOffsetSettings {
     pub mirror_axes: (bool, bool),
     pub resolution: f64,
     pub park_tool: bool,
+    pub samples_per_tool: usize,
 }
 
 impl Default for AutoOffsetSettings {
@@ -47,6 +52,8 @@ impl Default for AutoOffsetSettings {
             mirror_axes: (false, true),
             resolution: 0.00625,
             park_tool: true,
+            samples_per_tool: 3,
+            // samples_per_tool: 5,
         }
     }
 }
@@ -61,6 +68,7 @@ impl Default for AutoOffset {
             check_repeatability: 0,
             current_n: 0,
             repeatability: Vec::new(),
+            offsets: Vec::new(),
         }
     }
 }
@@ -83,8 +91,14 @@ impl AutoOffset {
         self.current_tool = tool;
     }
 
-    pub fn start_all_tools(&mut self, pos: (f64, f64)) {
-        unimplemented!()
+    pub fn start_all_tools(&mut self, pos: (f64, f64), num_tools: usize) {
+        *self = Self::default();
+
+        self.auto_offset_type = AutoOffsetType::AllTools;
+        self.prev_position = pos;
+        self.current_tool = -1;
+
+        self.offsets = vec![vec![]; num_tools];
     }
 
     pub fn start_repeatability(&mut self, pos: (f64, f64), tool: i32) {
@@ -233,5 +247,62 @@ impl AutoOffset {
 
     pub fn repeatability_count_mut(&mut self) -> &mut usize {
         &mut self.check_repeatability
+    }
+}
+
+impl App {
+    pub fn process_offsets(&mut self) {
+        warn!("TODO: process offsets");
+
+        #[cfg(feature = "nope")]
+        for tool in 0..self.options.num_tools {
+            let offsets = self.auto_offset.offsets[tool as usize].clone();
+
+            debug!("Tool {}:", tool);
+
+            for (i, ((x, y), (offset_x, offset_y))) in offsets.iter().enumerate() {
+                debug!(
+                    "\tOffset[{}]: ({:.3}, {:.3}), ({:.3}, {:.3})",
+                    i, x, y, offset_x, offset_y
+                );
+            }
+        }
+
+        let mut camera_pos = (0.0, 0.0);
+
+        for tool in 0..self.options.num_tools {
+            let offsets = self.auto_offset.offsets[tool as usize].clone();
+
+            let mut xs = offsets
+                .iter()
+                .map(|((x, _), (offset, _))| *x + offset)
+                .collect::<Vec<_>>();
+            let mut ys = offsets
+                .iter()
+                .map(|((_, y), (_, offset))| *y + offset)
+                .collect::<Vec<_>>();
+
+            /// calculate median:
+            xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            ys.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+            let median_x = xs[xs.len() / 2];
+            let median_y = ys[ys.len() / 2];
+
+            if tool == 0 {
+                camera_pos = (median_x, median_y);
+            } else {
+                let offset_x = median_x - camera_pos.0;
+                let offset_y = median_y - camera_pos.1;
+
+                debug!(
+                    "Setting tool {} offset: ({:.3}, {:.3})",
+                    tool, offset_x, offset_y
+                );
+
+                self.set_tool_offset(tool, Axis::X, offset_x);
+                self.set_tool_offset(tool, Axis::Y, offset_y);
+            }
+        }
     }
 }

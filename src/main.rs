@@ -10,7 +10,7 @@
 
 pub mod appconfig;
 pub mod klipper_async;
-pub mod klipper_protocol;
+// pub mod klipper_protocol;
 pub mod logging;
 pub mod saved_data;
 pub mod tests;
@@ -129,10 +129,10 @@ async fn main() -> Result<()> {
 
     let mut klipper = klipper_async::KlipperConn::new(url, inbox.sender(), rx, tx2).await?;
 
-    // klipper.subscribe_to_defaults().await?;
+    klipper.subscribe_to_defaults().await?;
 
     // klipper.list_objects().await?;
-    klipper.query_object("stepper_x").await?;
+    // klipper.query_object("stepper_x").await?;
 
     klipper.run().await?;
 

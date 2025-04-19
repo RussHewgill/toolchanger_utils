@@ -26,12 +26,6 @@ pub struct App {
     pub crosshair_circle_size: std::sync::Arc<std::sync::atomic::AtomicU32>,
 
     #[serde(skip)]
-    pub offset_axis: Axis,
-
-    #[serde(skip)]
-    pub offset_value: f64,
-
-    #[serde(skip)]
     pub current_tab: Tab,
 
     #[serde(skip)]
@@ -116,6 +110,12 @@ pub enum Axis {
     X,
     Y,
     Z,
+}
+
+impl std::fmt::Display for Axis {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_str())
+    }
 }
 
 impl Axis {

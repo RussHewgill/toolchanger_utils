@@ -550,8 +550,8 @@ fn locate_keypoints(
     let colors = [
         opencv::core::Scalar::new(0., 255., 0., 0.),   // green
         opencv::core::Scalar::new(255., 255., 0., 0.), // yellow
-        opencv::core::Scalar::new(0., 0., 255., 0.),   // red
-        opencv::core::Scalar::new(255., 0., 0., 0.),   // blue
+        opencv::core::Scalar::new(0., 0., 255., 0.),   // blue
+        opencv::core::Scalar::new(255., 0., 0., 0.),   // red
     ];
     // let mut color = None;
 

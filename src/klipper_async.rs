@@ -28,6 +28,7 @@ pub enum KlipperCommand {
     PickTool(u32),
     DropTool,
     AdjustToolOffset(u32, Axis, f64),
+    SetToolOffset(u32, Axis, f64),
     GetToolOffsets,
     DisableMotors,
     WaitForMoves,
@@ -303,6 +304,7 @@ impl KlipperConn {
         id
     }
 
+    /// toolhead.position is the actual coordinates, before applying tool offsets
     pub async fn subscribe_to_defaults(&mut self) -> Result<()> {
         let msg = serde_json::json!({
             "jsonrpc": "2.0",
@@ -399,7 +401,12 @@ impl KlipperConn {
             }
             KlipperCommand::PickTool(tool) => self.pick_tool(tool).await,
             KlipperCommand::DropTool => self.dropoff_tool().await,
-            KlipperCommand::AdjustToolOffset(_, axis, _) => todo!(),
+            KlipperCommand::AdjustToolOffset(tool, axis, amount) => {
+                self.adjust_tool_offset(tool as usize, axis, amount).await
+            }
+            KlipperCommand::SetToolOffset(tool, axis, amount) => {
+                self.set_tool_offset(tool as usize, axis, amount).await
+            }
             KlipperCommand::GetToolOffsets => self.get_offsets().await,
             KlipperCommand::DisableMotors => self.disable_motors().await,
             KlipperCommand::WaitForMoves => self.wait_for_moves().await,

@@ -1,7 +1,10 @@
 use anyhow::{anyhow, bail, ensure, Context, Result};
+use egui::{DragValue, Slider};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::ui::{auto_offset_types::AutoOffsetSettings, ui_types::App};
+
+use super::utils::make_scrollable;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Options {
@@ -110,6 +113,14 @@ impl App {
                     }
                 }
             }
+        });
+
+        ui.separator();
+
+        ui.horizontal(|ui| {
+            ui.label("Number of tools: ");
+            let resp = ui.add(Slider::new(&mut self.options.num_tools, 1..=4));
+            make_scrollable(ui, resp, &mut self.options.num_tools, 1);
         });
     }
 }

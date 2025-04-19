@@ -132,9 +132,15 @@ impl App {
             };
             if ui.add(button).clicked() {
                 if let Some((x, y, _)) = self.get_position() {
-                    if let Some(tool) = self.active_tool {
-                        if let Some((x, y, _)) = self.get_position() {
-                            self.auto_offset.start_all_tools((x, y));
+                    match self.auto_offset.auto_offset_type() {
+                        auto_offset::AutoOffsetType::AllTools => {
+                            self.auto_offset.stop();
+                        }
+                        _ => {
+                            if let Some((x, y, _)) = self.get_position() {
+                                self.auto_offset
+                                    .start_all_tools((x, y), self.options.num_tools as usize);
+                            }
                         }
                     }
                 }

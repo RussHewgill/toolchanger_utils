@@ -37,6 +37,7 @@ impl App {
     }
 
     pub fn home_all(&mut self) {
+        // self.send_klipper(KlipperCommand::PickTool(0));
         self.send_klipper(KlipperCommand::HomeAll);
     }
 
@@ -120,6 +121,14 @@ impl App {
                 self.move_to_position(pos, true);
             }
         }
+    }
+
+    pub fn adjust_tool_offset(&mut self, tool: usize, axis: Axis, amount: f64) {
+        self.send_klipper(KlipperCommand::AdjustToolOffset(tool as u32, axis, amount));
+    }
+
+    pub fn set_tool_offset(&mut self, tool: usize, axis: Axis, amount: f64) {
+        self.send_klipper(KlipperCommand::SetToolOffset(tool as u32, axis, amount));
     }
 
     pub fn adjust_offset_from_camera(&mut self, tool: usize, (x, y): (f64, f64)) {

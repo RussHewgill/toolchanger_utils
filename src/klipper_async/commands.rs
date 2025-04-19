@@ -166,6 +166,22 @@ impl KlipperConn {
         self.run_gcode(&format!("G4 P{}", ms)).await
     }
 
+    pub async fn adjust_tool_offset(&mut self, tool: usize, axis: Axis, amount: f64) -> Result<()> {
+        let gcode = format!(
+            "TC_ADJUST_OFFSET TOOL={} AXIS={} AMOUNT={:.6}",
+            tool, axis, amount
+        );
+        self.run_gcode(&gcode).await
+    }
+
+    pub async fn set_tool_offset(&mut self, tool: usize, axis: Axis, amount: f64) -> Result<()> {
+        let gcode = format!(
+            "TC_SET_OFFSET TOOL={} AXIS={} AMOUNT={:.6}",
+            tool, axis, amount
+        );
+        self.run_gcode(&gcode).await
+    }
+
     pub async fn get_offsets(&mut self) -> Result<()> {
         let vars = self.get_variables().await?;
 

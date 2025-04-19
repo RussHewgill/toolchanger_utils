@@ -5,7 +5,7 @@ use egui::RichText;
 use egui_extras::Column;
 use std::time::Instant;
 
-use crate::{klipper_protocol::KlipperProtocol, vision::VisionSettings};
+use crate::vision::VisionSettings;
 
 use super::ui_types::{App, Axis};
 
@@ -33,6 +33,22 @@ impl App {
         //     self.auto_offset.prev_position = (pos.0, pos.1);
         //     self.running_average.clear();
         // }
+
+        if matches!(self.auto_offset.auto_offset_type, AutoOffsetType::AllTools) {
+            if self.auto_offset.current_tool == -1 {
+                /// reset tool offsets to 0
+                for tool in 0..self.options.num_tools {
+                    self.set_tool_offset(tool, Axis::X, 0.0);
+                    self.set_tool_offset(tool, Axis::Y, 0.0);
+                }
+
+                self.dropoff_tool();
+                self.pickup_tool(0, true);
+                self.auto_offset.current_tool = 0;
+
+                return;
+            }
+        }
 
         let mut confidence = self.running_average.confidence();
         let mut guess = self.running_average.current_guess();
@@ -166,7 +182,7 @@ impl App {
             match self.auto_offset.auto_offset_type() {
                 AutoOffsetType::None => {}
                 AutoOffsetType::SingleTool => self._auto_offset_single(ui, (move_x, move_y)),
-                AutoOffsetType::AllTools => todo!(),
+                AutoOffsetType::AllTools => self._auto_offset_all(ui, (move_x, move_y)),
                 AutoOffsetType::RepeatabilityTest => {
                     self._auto_offset_repeatability(ui, (move_x, move_y))
                 }
@@ -272,6 +288,91 @@ impl App {
         self.auto_offset.last_move = Instant::now();
     }
 
+    /// to auto offset all tools:
+    /// first, pick up each tool, measure offset, and save it
+    /// repeat multiple times to get a good average
+    fn _auto_offset_all(&mut self, ui: &mut egui::Ui, (x, y): (f64, f64)) {
+        // debug!("_auto_offset_all");
+
+        let mut stop = false;
+
+        /// if the nozzle is centered, stop
+        if x.abs() < self.options.auto_offset_settings.target_max_offset
+            && y.abs() < self.options.auto_offset_settings.target_max_offset
+        {
+            stop = true;
+        }
+
+        /// if the nozzle isn't centered, but the offset is too small to move, stop
+        if x.abs() < self.options.auto_offset_settings.resolution
+            && y.abs() < self.options.auto_offset_settings.resolution
+        {
+            stop = true;
+        }
+
+        if stop {
+            let Some(pos) = self.get_position() else {
+                warn!("No position data available");
+                return;
+            };
+            self.auto_offset.offsets[self.auto_offset.current_tool as usize]
+                .push(((pos.0, pos.1), (x, y)));
+
+            if self.auto_offset.offsets[self.auto_offset.current_tool as usize].len()
+                >= self.options.auto_offset_settings.samples_per_tool
+            {
+                if self.auto_offset.current_tool == self.options.num_tools as i32 - 1 {
+                    // done sampling all tools
+
+                    self.process_offsets();
+
+                    self.auto_offset.stop();
+                } else {
+                    // finished sampling this tool, move to next
+                    self.auto_offset.current_tool += 1;
+                    self.pickup_tool(self.auto_offset.current_tool, true);
+
+                    self.running_average.clear();
+                    self.auto_offset.last_move = Instant::now() + std::time::Duration::from_secs(1);
+                }
+            } else {
+                /// found center, parking and unparking
+                self.dropoff_tool();
+                self.pickup_tool(self.auto_offset.current_tool, true);
+
+                self.running_average.clear();
+                self.auto_offset.last_move = Instant::now() + std::time::Duration::from_secs(1);
+            }
+            return;
+        } else {
+            debug!("Moving to center: ({:.4}, {:.4})", x, y);
+
+            if x.abs() > self.options.auto_offset_settings.target_max_offset
+                && x.abs() > self.options.auto_offset_settings.resolution
+            {
+                if x.abs() < 0.02 {
+                    debug!("Fine tuning X axis: ({:.5})", x / 4.);
+                    self.move_axis_relative(Axis::X, x / 4., true);
+                } else {
+                    self.move_axis_relative(Axis::X, x, true);
+                }
+            }
+
+            if y.abs() > self.options.auto_offset_settings.target_max_offset
+                && y.abs() > self.options.auto_offset_settings.resolution
+            {
+                if y.abs() < 0.02 {
+                    debug!("Fine tuning Y axis: ({:.5})", y / 4.);
+                    self.move_axis_relative(Axis::Y, y / 4., true);
+                } else {
+                    self.move_axis_relative(Axis::Y, y, true);
+                }
+            }
+
+            self.auto_offset.last_move = Instant::now();
+        }
+    }
+
     fn _auto_offset_repeatability(&mut self, ui: &mut egui::Ui, (x, y): (f64, f64)) {
         let mut stop = false;
 
@@ -291,18 +392,18 @@ impl App {
             stop = true;
         }
 
+        let Some(pos) = self.get_position() else {
+            warn!("No position data available");
+            return;
+        };
+        self.auto_offset
+            .repeatability
+            .push(((pos.0, pos.1), (x, y)));
+
         if stop {
             if self.auto_offset.check_repeatability == 0 {
                 let t = self.auto_offset.auto_offset_type;
                 self.auto_offset.stop();
-
-                let Some(pos) = self.get_position() else {
-                    warn!("No position data available");
-                    return;
-                };
-                self.auto_offset
-                    .repeatability
-                    .push(((pos.0, pos.1), (x, y)));
 
                 self.auto_offset
                     .process_repeatibility(matches!(t, AutoOffsetType::HomingTest));
@@ -346,14 +447,6 @@ impl App {
                             error!("Failed to send snapshot command to vision thread");
                         });
                 }
-
-                let Some(pos) = self.get_position() else {
-                    warn!("No position data available");
-                    return;
-                };
-                self.auto_offset
-                    .repeatability
-                    .push(((pos.0, pos.1), (x, y)));
 
                 match self.auto_offset.auto_offset_type {
                     AutoOffsetType::RepeatabilityTest => {

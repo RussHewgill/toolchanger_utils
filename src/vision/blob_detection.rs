@@ -31,9 +31,8 @@ impl BlobDetectors {
             threshold_step: 25.0,
 
             filter_by_area: true,
-            // min_area: 1000.,
-            // min_area: 2000.,
-            min_area: 3000.,
+            // min_area: 3000.,
+            min_area: 8000.,
             max_area: 50_000.,
 
             filter_by_circularity: true,
@@ -41,7 +40,8 @@ impl BlobDetectors {
             max_circularity: 1.0,
 
             filter_by_convexity: true,
-            min_convexity: 0.8,
+            // min_convexity: 0.8,
+            min_convexity: 0.6,
             max_convexity: 1.0,
 
             filter_by_inertia: true,

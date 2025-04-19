@@ -19,3 +19,4 @@ auto_offset2.rs
 saved_data.toml
 *data.txt
 data_output
+.github/workflows/rust.yaml
