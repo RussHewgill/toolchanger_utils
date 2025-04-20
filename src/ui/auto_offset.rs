@@ -24,7 +24,7 @@ impl App {
     }
 
     fn _auto_offset_ui(&mut self, ui: &mut egui::Ui) {
-        let Some(pos) = self.get_position() else {
+        let Some(pos) = self.get_adjusted_position() else {
             ui.label("No position data available");
             return;
         };
@@ -63,19 +63,6 @@ impl App {
             if ui.button("Clear Running Average").clicked() {
                 self.running_average.clear();
             }
-
-            ui.checkbox(
-                &mut self.options.auto_offset_settings.swap_axes,
-                "Swap Axes",
-            );
-            ui.checkbox(
-                &mut self.options.auto_offset_settings.mirror_axes.0,
-                "Mirror X Axis",
-            );
-            ui.checkbox(
-                &mut self.options.auto_offset_settings.mirror_axes.1,
-                "Mirror Y Axis",
-            );
         });
 
         ui.horizontal(|ui| {
@@ -220,7 +207,7 @@ impl App {
         ui.horizontal(|ui| {
             // let confidence = self.running_average.confidence();
             if let Some(guess) = self.running_average.current_guess() {
-                if let Some(pos) = self.get_position() {
+                if let Some(pos) = self.get_adjusted_position() {
                     let (x, y, r) = self._pixels_to_mm_from_center(guess.0, guess.1, guess.2);
 
                     let (x, y) = self._apply_screen_transform((x, y));
@@ -311,7 +298,7 @@ impl App {
         }
 
         if stop {
-            let Some(pos) = self.get_position() else {
+            let Some(pos) = self.get_adjusted_position() else {
                 warn!("No position data available");
                 return;
             };
@@ -392,7 +379,7 @@ impl App {
             stop = true;
         }
 
-        let Some(pos) = self.get_position() else {
+        let Some(pos) = self.get_adjusted_position() else {
             warn!("No position data available");
             return;
         };
@@ -524,14 +511,14 @@ impl App {
     }
 
     fn _apply_screen_transform(&self, (mut x, mut y): (f64, f64)) -> (f64, f64) {
-        if self.options.auto_offset_settings.swap_axes {
+        if self.options.swap_axes {
             std::mem::swap(&mut x, &mut y);
         }
-        if self.options.auto_offset_settings.mirror_axes.0 {
+        if self.options.mirror_axes.0 {
             // debug!("Mirroring X axis");
             x *= -1.0;
         }
-        if self.options.auto_offset_settings.mirror_axes.1 {
+        if self.options.mirror_axes.1 {
             // debug!("Mirroring Y axis");
             y *= -1.0;
         }

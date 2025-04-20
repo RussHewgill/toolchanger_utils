@@ -45,13 +45,25 @@ impl App {
         self.send_klipper(KlipperCommand::HomeXY);
     }
 
-    pub fn get_position(&mut self) -> Option<(f64, f64, f64)> {
+    /// fetch the most recent position (before offsets applied)
+    pub fn get_carriage_position(&mut self) -> Option<(f64, f64, f64)> {
         let Some(s) = self.klipper_status.as_ref() else {
             debug!("klipper is not connected");
             return None;
         };
 
         let pos = s.blocking_read().position;
+
+        pos
+    }
+
+    pub fn get_adjusted_position(&mut self) -> Option<(f64, f64, f64)> {
+        let Some(s) = self.klipper_status.as_ref() else {
+            debug!("klipper is not connected");
+            return None;
+        };
+
+        let pos = s.blocking_read().gcode_position;
 
         pos
     }
@@ -104,6 +116,7 @@ impl App {
     pub fn dropoff_tool(&mut self) {
         self.send_klipper(KlipperCommand::DropTool);
         self.active_tool = None;
+        self.send_klipper(KlipperCommand::WaitForMoves);
     }
 
     pub fn pickup_tool(&mut self, tool: i32, move_to_camera: bool) {
@@ -113,6 +126,7 @@ impl App {
         }
 
         self.send_klipper(KlipperCommand::PickTool(tool as u32));
+        self.send_klipper(KlipperCommand::WaitForMoves);
 
         self.active_tool = Some(tool as usize);
 
@@ -129,6 +143,10 @@ impl App {
 
     pub fn set_tool_offset(&mut self, tool: usize, axis: Axis, amount: f64) {
         self.send_klipper(KlipperCommand::SetToolOffset(tool as u32, axis, amount));
+    }
+
+    pub fn fetch_tool_offsets(&mut self) {
+        self.send_klipper(KlipperCommand::GetToolOffsets);
     }
 
     pub fn adjust_offset_from_camera(&mut self, tool: usize, (x, y): (f64, f64)) {

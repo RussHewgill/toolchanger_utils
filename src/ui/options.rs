@@ -15,6 +15,9 @@ pub struct Options {
     pub camera_size: (f64, f64),
     pub camera_scale: f64,
 
+    pub swap_axes: bool,
+    pub mirror_axes: (bool, bool),
+    // pub rotate: usize,
     pub z_height: f64,
 
     #[serde(skip)]
@@ -30,6 +33,9 @@ impl Default for Options {
             bounce_amount: 0.5,
             camera_size: (1280., 800.),
             camera_scale: 0.5,
+
+            swap_axes: true,
+            mirror_axes: (false, true),
 
             // z_height: 33.51,
             z_height: 33.2,

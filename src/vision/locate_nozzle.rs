@@ -399,6 +399,70 @@ pub fn locate_nozzle(
         img_out2 = img_out.clone();
     }
 
+    /// Hough Circles
+    #[cfg(feature = "nope")]
+    if settings.use_hough {
+        let Some((color, circles)) = locate_keypoints_hough(settings, &mat0, &mat1, &mat2)? else {
+            // debug!("Keypoints not found, skipping circle detection");
+            return Ok((img_out2, None));
+        };
+
+        /// hough circles
+        for circle in circles {
+            let (x, y) = if settings.prescale > 1.0 {
+                let x = circle[0] / settings.prescale as f32;
+                let y = circle[1] / settings.prescale as f32;
+                (x, y)
+            } else {
+                let x = circle[0];
+                let y = circle[1];
+                (x, y)
+            };
+
+            if best_circle.is_none() {
+                best_circle = Some((x as f64, y as f64, 50.));
+            }
+
+            if settings.draw_circle {
+                let mut img_color = Mat::new_rows_cols_with_default(
+                    img_out2.rows(),
+                    img_out2.cols(),
+                    opencv::core::CV_8UC3,
+                    0.0f64.into(),
+                )?;
+
+                if img_out2.data_bytes().unwrap().len() != img0.len() {
+                    cvt_color(
+                        &img_out2,
+                        &mut img_color,
+                        // COLOR_BGR2GRAY,
+                        opencv::imgproc::COLOR_GRAY2RGB,
+                        0,
+                        opencv::core::AlgorithmHint::ALGO_HINT_DEFAULT,
+                    )
+                    .unwrap();
+                    // std::mem::swap(&mut img, &mut img2);
+                } else {
+                    img_color = img_out2.clone();
+                }
+
+                let center = opencv::core::Point::new(x as i32, y as i32);
+
+                let radius = 50;
+                // let center = opencv::core::Point::new(322, 241);
+                // let color = opencv::core::Scalar::new(0., 255., 0., 0.);
+                let thickness = 2;
+                opencv::imgproc::circle(&mut img_color, center, radius, color, thickness, 16, 0)?;
+
+                // let center = opencv::core::Point::new(img_color.cols() / 2, img_color.rows() / 2);
+                // let color = opencv::core::Scalar::new(255., 255., 0., 0.);
+                // opencv::imgproc::circle(&mut img_color, center, radius / 2, color, 1, 16, 0)?;
+
+                img_out2 = img_color;
+            }
+        }
+    }
+
     // #[cfg(feature = "nope")]
     if settings.use_hough {
         let Some(color) = locate_keypoints(settings, detectors, &mat0, &mat1, &mat2)? else {
@@ -406,7 +470,14 @@ pub fn locate_nozzle(
             return Ok((img_out2, None));
         };
 
+        /// blob detection
         if let Ok(keypoint) = detectors.keypoints.get(0) {
+            // eprintln!("Radius: {:.1}", radius);
+            // eprintln!(
+            //     "Area: {:.1}",
+            //     (keypoint.size() / 2.).powi(2) * std::f32::consts::PI
+            // );
+
             let (x, y, radius) = if settings.prescale > 1.0 {
                 let x = keypoint.pt().x / settings.prescale as f32;
                 let y = keypoint.pt().y / settings.prescale as f32;
@@ -536,6 +607,79 @@ pub fn locate_nozzle(
     }
 
     Ok((img_out2, best_circle))
+}
+
+fn locate_keypoints_hough(
+    settings: &VisionSettings,
+    mat_binary: &Mat,
+    mat_triangle: &Mat,
+    mat_otsu: &Mat,
+) -> Result<Option<(opencv::core::Scalar, Vector<Vec3f>)>> {
+    let colors = [
+        opencv::core::Scalar::new(0., 255., 0., 0.),   // green
+        opencv::core::Scalar::new(255., 255., 0., 0.), // yellow
+        opencv::core::Scalar::new(0., 0., 255., 0.),   // blue
+        opencv::core::Scalar::new(255., 0., 0., 0.),   // red
+    ];
+
+    let dp = 1.0; // Inverse ratio of accumulator resolution to image resolution
+    let min_dist = 20.0; // Minimum distance between detected centers
+    let param1 = 100.0; // Upper threshold for the Canny edge detector
+    let param2 = 30.0; // Accumulator threshold for the circle centers at the detection stage
+    let min_radius = 50; // Minimum circle radius
+    let max_radius = 200; // Maximum circle radius
+
+    // Detect circles using Hough Transform
+    let mut circles: Vector<Vec3f> = Vector::new();
+    hough_circles(
+        &mat_binary,
+        &mut circles,
+        imgproc::HOUGH_GRADIENT,
+        dp,
+        min_dist,
+        param1,
+        param2,
+        min_radius,
+        max_radius,
+    )?;
+
+    if circles.len() > 0 {
+        return Ok(Some((colors[0], circles)));
+    }
+
+    hough_circles(
+        &mat_triangle,
+        &mut circles,
+        imgproc::HOUGH_GRADIENT,
+        dp,
+        min_dist,
+        param1,
+        param2,
+        min_radius,
+        max_radius,
+    )?;
+
+    if circles.len() > 0 {
+        return Ok(Some((colors[1], circles)));
+    }
+
+    hough_circles(
+        &mat_otsu,
+        &mut circles,
+        imgproc::HOUGH_GRADIENT,
+        dp,
+        min_dist,
+        param1,
+        param2,
+        min_radius,
+        max_radius,
+    )?;
+
+    if circles.len() > 0 {
+        return Ok(Some((colors[2], circles)));
+    }
+
+    Ok(None)
 }
 
 fn locate_keypoints(

@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use crate::vision::preprocess::{PreprocessStep, PreprocessStepType};
+use crate::vision::{
+    blob_detection::BlobParams,
+    preprocess::{PreprocessStep, PreprocessStepType},
+};
 
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 pub struct App {
@@ -89,6 +92,12 @@ pub struct App {
     #[serde(skip)]
     /// for display only, not for sending to klipper
     pub last_position: (f64, f64, f64),
+
+    #[serde(skip)]
+    pub last_position_fetch: Option<std::time::Instant>,
+
+    #[serde(skip)]
+    pub blob_params: BlobParams,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, PartialOrd)]

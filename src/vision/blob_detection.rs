@@ -18,6 +18,15 @@ pub struct BlobDetectors {
     pub keypoints: Vector<opencv::core::KeyPoint>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BlobParams(pub SimpleBlobDetector_Params);
+
+impl Default for BlobParams {
+    fn default() -> Self {
+        BlobParams(BlobDetectors::blob_params_standard())
+    }
+}
+
 impl BlobDetectors {
     /// Optimized, pass 2
     /// [51.994232, 53.994232, 1000.0, 50000.0, 0.758737, 0.8, 0.2]
@@ -32,16 +41,17 @@ impl BlobDetectors {
 
             filter_by_area: true,
             // min_area: 3000.,
-            min_area: 8000.,
-            max_area: 50_000.,
+            min_area: 7000.,
+            max_area: 15_000.,
 
             filter_by_circularity: true,
             min_circularity: 0.75,
+            // min_circularity: 0.85,
             max_circularity: 1.0,
 
             filter_by_convexity: true,
             // min_convexity: 0.8,
-            min_convexity: 0.6,
+            min_convexity: 0.7,
             max_convexity: 1.0,
 
             filter_by_inertia: true,
@@ -241,6 +251,11 @@ impl BlobDetectors {
             min_dist_between_blobs: 2.,
             collect_contours: false,
         }
+    }
+
+    pub fn set_params_standard(&mut self, new_params: SimpleBlobDetector_Params) {
+        self.params_standard = new_params.clone();
+        self.standard = SimpleBlobDetector::create(new_params).unwrap();
     }
 
     /// XXX: uses same params for all solvers

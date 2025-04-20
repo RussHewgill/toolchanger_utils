@@ -113,7 +113,7 @@ impl App {
                 ) {
                     self.auto_offset.stop();
                 } else {
-                    if let Some((x, y, _)) = self.get_position() {
+                    if let Some((x, y, _)) = self.get_carriage_position() {
                         if let Some(tool) = self.active_tool {
                             self.auto_offset.start_single((x, y), tool as i32);
                         }
@@ -131,16 +131,14 @@ impl App {
                 button
             };
             if ui.add(button).clicked() {
-                if let Some((x, y, _)) = self.get_position() {
+                if let Some((x, y, _)) = self.get_carriage_position() {
                     match self.auto_offset.auto_offset_type() {
                         auto_offset::AutoOffsetType::AllTools => {
                             self.auto_offset.stop();
                         }
                         _ => {
-                            if let Some((x, y, _)) = self.get_position() {
-                                self.auto_offset
-                                    .start_all_tools((x, y), self.options.num_tools as usize);
-                            }
+                            self.auto_offset
+                                .start_all_tools((x, y), self.options.num_tools as usize);
                         }
                     }
                 }
@@ -156,7 +154,7 @@ impl App {
                 button
             };
             if ui.add(button).clicked() {
-                if let Some((x, y, _)) = self.get_position() {
+                if let Some((x, y, _)) = self.get_carriage_position() {
                     if let Some(t) = self.active_tool {
                         match self.auto_offset.auto_offset_type() {
                             auto_offset::AutoOffsetType::RepeatabilityTest => {
@@ -164,9 +162,7 @@ impl App {
                             }
                             _ => {
                                 debug!("Starting repeatability test");
-                                if let Some((x, y, _)) = self.get_position() {
-                                    self.auto_offset.start_repeatability((x, y), t as i32);
-                                }
+                                self.auto_offset.start_repeatability((x, y), t as i32);
                             }
                         }
                     }
@@ -183,12 +179,10 @@ impl App {
                 button
             };
             if ui.add(button).clicked() {
-                if let Some((x, y, _)) = self.get_position() {
+                if let Some((x, y, _)) = self.get_carriage_position() {
                     if let Some(t) = self.active_tool {
                         debug!("Starting repeatability test");
-                        if let Some((x, y, _)) = self.get_position() {
-                            self.auto_offset.start_homing((x, y), t as i32);
-                        }
+                        self.auto_offset.start_homing((x, y), t as i32);
                     }
                 }
             }
@@ -292,7 +286,7 @@ impl App {
 
         /// Camera Offset
         ui.horizontal(|ui| {
-            if let Some((x, y, z)) = self.get_position() {
+            if let Some((x, y, z)) = self.get_adjusted_position() {
                 if ui
                     .add(
                         egui::Button::new(RichText::new("Save camera Position").size(16.))
@@ -345,17 +339,28 @@ impl App {
                             .size(16.),
                         );
 
-                        let (offset_x, offset_y, _) = if let Some(t) = self.active_tool {
-                            self.tool_offsets.get(t).copied().unwrap_or_else(|| {
-                                error!("Failed to get tool offsets");
-                                (0., 0., 0.)
-                            })
-                        } else {
-                            (0., 0., 0.)
-                        };
+                        // let (offset_x, offset_y, _) = if let Some(t) = self.active_tool {
+                        //     if t == 0 {
+                        //         (0., 0., 0.)
+                        //     } else {
+                        //         self.tool_offsets.get(t).copied().unwrap_or_else(|| {
+                        //             error!("Failed to get tool offsets");
+                        //             (0., 0., 0.)
+                        //         })
+                        //     }
+                        // } else {
+                        //     (0., 0., 0.)
+                        // };
 
-                        let cx = x - camera_x - offset_x;
-                        let cy = y - camera_y - offset_y;
+                        // debug!(
+                        //     "x = {:?}, camera_x = {:?}, offset_x = {:?}",
+                        //     x, camera_x, offset_x
+                        // );
+
+                        // let cx = x - camera_x - offset_x;
+                        // let cy = y - camera_y - offset_y;
+                        let cx = x - camera_x;
+                        let cy = y - camera_y;
                         ui.label(
                             RichText::new(format!(
                                 "Diff from Camera (GCode): {:.4}, {:.4}",
@@ -396,6 +401,43 @@ impl App {
         });
         ui.separator();
 
+        ui.horizontal(|ui| {
+            let Some((x, y, z)) = self.get_adjusted_position() else {
+                return;
+            };
+
+            let Some((camera_x, camera_y)) = self.camera_pos else {
+                return;
+            };
+
+            let Some(tool) = self.active_tool else {
+                return;
+            };
+
+            // let Some((offset_x, offset_y, _)) = self.tool_offsets.get(tool) else {
+            //     warn!("Failed to get tool offsets");
+            //     return;
+            // };
+
+            if ui
+                .button(RichText::new("Apply Camera Offset").size(16.))
+                .clicked()
+            {
+                // let offset_x = x - *offset_x - camera_x;
+                // let offset_y = y - *offset_y - camera_y;
+
+                let offset_x = x - camera_x;
+                let offset_y = y - camera_y;
+
+                debug!("Applying tool offsets: ({:.4}, {:.4})", offset_x, offset_y);
+
+                self.adjust_tool_offset(tool, Axis::X, offset_x);
+                self.adjust_tool_offset(tool, Axis::Y, offset_y);
+
+                self.move_to_position((camera_x, camera_y), true);
+            }
+        });
+
         /// Test positions
         #[cfg(feature = "nope")]
         ui.horizontal(|ui| {
@@ -434,7 +476,7 @@ impl App {
         #[cfg(feature = "nope")]
         ui.separator();
 
-        let Some((x, y, z)) = self.get_position() else {
+        let Some((x, y, z)) = self.get_carriage_position() else {
             ui.label("No position");
             return;
         };
@@ -477,7 +519,7 @@ impl App {
     }
 
     fn movement_controls(&mut self, ui: &mut egui::Ui) {
-        let Some((x, y, z)) = self.get_position() else {
+        let Some((x, y, z)) = self.get_adjusted_position() else {
             ui.label("No position");
             return;
         };
@@ -519,8 +561,14 @@ impl App {
             });
         });
 
+        ui.label("True position");
         ui.horizontal(|ui| {
-            self.position_labels(ui);
+            self.position_labels(ui, false);
+        });
+
+        ui.label("Offset position");
+        ui.horizontal(|ui| {
+            self.position_labels(ui, true);
         });
 
         ui.group(|ui| {
@@ -549,10 +597,26 @@ impl App {
         });
     }
 
-    fn position_labels(&mut self, ui: &mut egui::Ui) {
-        let Some((x, y, z)) = self.get_position() else {
-            ui.label("No position");
-            return;
+    fn position_labels(&mut self, ui: &mut egui::Ui, adjusted: bool) {
+        // let Some((x, y, z)) = self.get_adjusted_position() else {
+        //     ui.label("No position");
+        //     return;
+        // };
+
+        let (x, y, z) = if adjusted {
+            if let Some((x, y, z)) = self.get_adjusted_position() {
+                (x, y, z)
+            } else {
+                ui.label("No position");
+                return;
+            }
+        } else {
+            if let Some((x, y, z)) = self.get_carriage_position() {
+                (x, y, z)
+            } else {
+                ui.label("No position");
+                return;
+            }
         };
 
         fn label(ui: &mut egui::Ui, (x, y, z): (f64, f64, f64), axis: Axis) {
@@ -1219,6 +1283,20 @@ impl eframe::App for App {
             self.klipper_started = true;
         }
 
+        if self
+            .last_position_fetch
+            .map(|t| t.elapsed() > std::time::Duration::from_millis(500))
+            .unwrap_or(true)
+        {
+            if let Some(tx) = self.klipper_tx.as_mut() {
+                tx.blocking_send(crate::klipper_async::KlipperCommand::FetchPosition)
+                    .unwrap_or_else(|e| {
+                        error!("Failed to send command: {}", e);
+                    });
+                self.last_position_fetch = Some(std::time::Instant::now());
+            }
+        }
+
         self.inbox.set_ctx(ctx);
         while let Some(msg) = self.inbox.read_without_ctx().next() {
             match msg {
@@ -1229,7 +1307,17 @@ impl eframe::App for App {
                     self.errors.push(e.to_string());
                 }
                 crate::klipper_async::KlipperMessage::ToolOffsets(offsets) => {
+                    debug!("Updating tool offsets: {:?}", offsets);
                     self.tool_offsets = offsets
+                }
+                crate::klipper_async::KlipperMessage::HomingOriginChanged((x, y, z)) => {
+                    // unimplemented!()
+                    // warn!(
+                    //     "TODO: Homing origin changed: ({:.3}, {:.3}, {:.3})",
+                    //     x, y, z
+                    // );
+
+                    // self.fetch_tool_offsets();
                 }
                 _ => {
                     debug!("Unhandled message: {:?}", msg);
@@ -1330,20 +1418,19 @@ impl eframe::App for App {
                             ui.separator();
                         }
 
-                        // Original tool offsets section
-                        if self.tool_offsets.is_empty() {
-                            ui.label("No tool offsets");
-                            return;
-                        }
+                        // // Original tool offsets section
+                        // if self.tool_offsets.is_empty() {
+                        //     ui.label("No tool offsets");
+                        //     return;
+                        // }
 
-                        for t in 0..4 {
-                            let (x, y, z) = self.tool_offsets[t];
-
-                            ui.label(format!("Tool {} offsets:", t));
-                            ui.label(format!("X: {:.3}", x));
-                            ui.label(format!("Y: {:.3}", y));
-                            ui.separator();
-                        }
+                        // for t in 0..4 {
+                        //     let (x, y, z) = self.tool_offsets[t];
+                        //     ui.label(format!("Tool {} offsets:", t));
+                        //     ui.label(format!("X: {:.3}", x));
+                        //     ui.label(format!("Y: {:.3}", y));
+                        //     ui.separator();
+                        // }
                     });
 
                 egui::TopBottomPanel::bottom("bottom")

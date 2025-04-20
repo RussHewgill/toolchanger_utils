@@ -4,6 +4,8 @@ use std::collections::VecDeque;
 
 use nokhwa::utils::{ControlValueSetter, KnownCameraControl};
 
+use super::blob_detection::BlobParams;
+
 // pub use self::running_average::*;
 // pub use self::circle_aggregator::*;
 
@@ -17,13 +19,15 @@ pub enum NozzlePosition {
     NotVisible,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum WebcamCommand {
     ConnectCamera(usize),
     SaveScreenshot(Option<(f64, f64)>, Option<String>),
     SetCameraControl(CameraControl),
     GetCameraFormats,
     SetCameraFormat(CameraFormat),
+    SetBlobParams(BlobParams),
+    SetMirrorAxes(bool, bool),
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]

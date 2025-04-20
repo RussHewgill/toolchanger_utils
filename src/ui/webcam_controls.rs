@@ -238,11 +238,149 @@ impl App {
         // self.webcam_camera_controls(ui);
         // ui.end_row();
 
+        ui.vertical(|ui| {
+            let r0 = ui.checkbox(&mut self.options.swap_axes, "Swap Axes");
+            let r1 = ui.checkbox(&mut self.options.mirror_axes.0, "Mirror X Axis");
+            let r2 = ui.checkbox(&mut self.options.mirror_axes.1, "Mirror Y Axis");
+
+            if r0.changed() || r1.changed() || r2.changed() {
+                self.channel_to_vision
+                    .as_ref()
+                    .unwrap()
+                    .send(WebcamCommand::SetMirrorAxes(
+                        self.options.mirror_axes.0,
+                        self.options.mirror_axes.1,
+                    ))
+                    .unwrap();
+            }
+        });
+
+        ui.end_row();
+        ui.separator();
+        ui.end_row();
+
+        self.blob_controls(ui);
+        ui.end_row();
+
         if self.vision_settings != self.vision_settings_prev {
             let mut settings = self.webcam_settings_mutex.lock().unwrap();
             *settings = self.vision_settings;
             self.vision_settings_prev = self.vision_settings.clone();
         }
+    }
+
+    fn blob_controls(&mut self, ui: &mut egui::Ui) {
+        // let prev_blob = self.blob_params.clone();
+        ui.vertical(|ui| {
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Min Area");
+                    let resp = ui.add(
+                        egui::DragValue::new(&mut self.blob_params.0.min_area)
+                            .range(1_000.0..=50_000.0)
+                            .speed(500.),
+                    );
+                    crate::ui::utils::make_scrollable_f(
+                        ui,
+                        resp,
+                        &mut self.blob_params.0.min_area,
+                        500.0,
+                        1_000.0,
+                        50_000.0,
+                    );
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Max Area");
+                    let resp = ui.add(
+                        egui::DragValue::new(&mut self.blob_params.0.max_area)
+                            .range(1_000.0..=50_000.0)
+                            .speed(500.),
+                    );
+                    crate::ui::utils::make_scrollable_f(
+                        ui,
+                        resp,
+                        &mut self.blob_params.0.max_area,
+                        500.0,
+                        1_000.0,
+                        50_000.0,
+                    );
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Min Circularity");
+                    let resp = ui.add(
+                        egui::DragValue::new(&mut self.blob_params.0.min_circularity)
+                            .range(0.0..=1.0),
+                    );
+                    crate::ui::utils::make_scrollable_f(
+                        ui,
+                        resp,
+                        &mut self.blob_params.0.min_circularity,
+                        0.05,
+                        0.0,
+                        1.0,
+                    );
+                });
+
+                // ui.horizontal(|ui| {
+                //     ui.label("Max Circularity");
+                //     let resp = ui.add(
+                //         egui::DragValue::new(&mut self.blob_params.0.max_circularity)
+                //             .range(0.0..=1.0),
+                //     );
+                //     crate::ui::utils::make_scrollable_f(ui, resp, &mut self.blob_params.0.max_circularity, 0.05, 0.0, 1.0);
+                // });
+
+                ui.horizontal(|ui| {
+                    ui.label("Min Convexity");
+                    let resp = ui.add(
+                        egui::DragValue::new(&mut self.blob_params.0.min_convexity)
+                            .range(0.0..=1.0),
+                    );
+                    crate::ui::utils::make_scrollable_f(
+                        ui,
+                        resp,
+                        &mut self.blob_params.0.min_convexity,
+                        0.05,
+                        0.0,
+                        1.0,
+                    );
+                });
+
+                // ui.horizontal(|ui| {
+                //     ui.label("Max Convexity");
+                //     let resp = ui.add(
+                //         egui::DragValue::new(&mut self.blob_params.0.max_convexity)
+                //             .range(0.0..=1.0),
+                //     );
+                //     crate::ui::utils::make_scrollable_f(ui, resp, &mut self.blob_params.0.max_convexity, 0.05, 0.0, 1.0);
+                // });
+
+                ui.horizontal(|ui| {
+                    ui.label("Min Inertia Ratio");
+                    let resp = ui.add(
+                        egui::DragValue::new(&mut self.blob_params.0.min_inertia_ratio)
+                            .range(0.0..=1.0),
+                    );
+                    crate::ui::utils::make_scrollable_f(
+                        ui,
+                        resp,
+                        &mut self.blob_params.0.min_inertia_ratio,
+                        0.05,
+                        0.0,
+                        1.0,
+                    );
+                });
+            });
+            if ui.button("Apply").clicked() {
+                self.channel_to_vision
+                    .as_ref()
+                    .unwrap()
+                    .send(WebcamCommand::SetBlobParams(self.blob_params.clone()))
+                    .unwrap();
+            }
+        });
     }
 
     fn webcam_camera_controls(&mut self, ui: &mut egui::Ui) {

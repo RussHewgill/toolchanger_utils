@@ -34,6 +34,7 @@ pub fn spawn_locator_thread(
     webcam_settings_mutex: Arc<Mutex<crate::vision::VisionSettings>>,
     // camera_size: (f64, f64),
     mut format: Option<CameraFormat>,
+    // mut mirror: (bool, bool),
 ) {
     std::thread::spawn(move || {
         debug!("Camera supervisor thread running");
@@ -58,6 +59,14 @@ pub fn spawn_locator_thread(
                         debug!("Setting camera format: {:?}", f);
                         format = Some(f);
                     }
+                    WebcamCommand::SetBlobParams(params) => {
+                        debug!("Can't set blob params here");
+                        // todo!()
+                    }
+                    WebcamCommand::SetMirrorAxes(_, _) => {
+                        debug!("Can't set mirror axes here");
+                        // todo!()
+                    }
                 }
             }
 
@@ -73,6 +82,7 @@ pub fn spawn_locator_thread(
                     webcam_settings_mutex.clone(),
                     // camera_size,
                     format,
+                    (false, false),
                 ) {
                     debug!("Failed to spawn camera thread: {}", e);
                 }
@@ -122,6 +132,7 @@ fn _spawn_camera_thread(
     webcam_settings_mutex: Arc<Mutex<crate::vision::VisionSettings>>,
     // camera_size: (f64, f64),
     set_format: CameraFormat,
+    mirror: (bool, bool),
 ) -> Result<()> {
     let _format = RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
 
@@ -240,6 +251,12 @@ fn _spawn_camera_thread(
                     // debug!("Can't set camera formats here");
                     bail!("Restarting vision thread to change format");
                 }
+                WebcamCommand::SetBlobParams(new_params) => {
+                    debug!("Setting blob params");
+                    detectors.set_params_standard(new_params.0);
+                    // todo!()
+                }
+                WebcamCommand::SetMirrorAxes(x, y) => todo!(),
             }
         }
 

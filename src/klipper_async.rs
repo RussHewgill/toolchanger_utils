@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod klipper_async_types;
 
 use std::sync::Arc;
 
@@ -14,86 +15,15 @@ use tokio::{net::TcpStream, sync::RwLock, time::Instant};
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use url::Url;
 
+pub use self::klipper_async_types::*;
 use crate::{ui::ui_types::Axis, vision::WebcamMessage};
-
-#[derive(Debug)]
-pub enum KlipperCommand {
-    // MovePosition((f64, f64), Option<f64>),
-    MoveToPosition((f64, f64, f64), Option<f64>),
-    // MovePositionRelative((f64, f64), Option<f64>),
-    MoveAxisRelative(Axis, f64, Option<f64>),
-    HomeXY,
-    HomeAll,
-    GetPosition(tokio::sync::oneshot::Sender<Option<(f64, f64, f64)>>),
-    PickTool(u32),
-    DropTool,
-    AdjustToolOffset(u32, Axis, f64),
-    SetToolOffset(u32, Axis, f64),
-    GetToolOffsets,
-    DisableMotors,
-    WaitForMoves,
-    Dwell(u32),
-}
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub enum KlipperMessage {
-    Position((f64, f64, f64)),
-    // MotorsDisabled,
-    AxesHomed((bool, bool, bool)),
-    // CameraPosition((f64, f64)),
-    // ZHeight(f64),
-    // ZHeightStale,
-    KlipperError(String),
-    ToolOffsets(Vec<(f64, f64, f64)>),
-}
-
-pub struct KlipperConn {
-    url: String,
-    ws_write: SplitSink<
-        WebSocketStream<MaybeTlsStream<TcpStream>>,
-        tokio_tungstenite::tungstenite::Message,
-    >,
-    // ws_read: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
-    // current_status: KlipperStatus,
-    current_status: Arc<RwLock<KlipperStatus>>,
-    inbox: UiInboxSender<KlipperMessage>,
-    // inbox_position: UiInboxSender<(f64, f64, f64)>,
-    channel_from_ui: tokio::sync::mpsc::Receiver<KlipperCommand>,
-    id: usize,
-}
-
-#[derive(Clone, Debug)]
-pub struct KlipperStatus {
-    pub last_position_update: Instant,
-    pub absolute_coordinates: bool,
-    pub position: Option<(f64, f64, f64)>,
-    // pub active_tool: Option<u32>,
-    pub homed_axes: (bool, bool, bool),
-    pub vars: Option<(Instant, serde_json::Value)>,
-    pub resolution: f64,
-    pub motors_enabled: (bool, bool, bool),
-}
-
-impl Default for KlipperStatus {
-    fn default() -> Self {
-        KlipperStatus {
-            last_position_update: Instant::now(),
-            absolute_coordinates: true,
-            position: None,
-            // active_tool: None,
-            homed_axes: (false, false, false),
-            vars: None,
-            resolution: 0.0,
-            motors_enabled: (false, false, false),
-        }
-    }
-}
 
 impl KlipperStatus {
     fn _update_pos(
         &mut self,
         sender: &UiInboxSender<KlipperMessage>,
         pos: &serde_json::Value,
+        gcode_pos: bool,
     ) -> Result<()> {
         match (pos[0].as_f64(), pos[1].as_f64(), pos[2].as_f64()) {
             (Some(x), Some(y), Some(z)) => {
@@ -101,11 +31,35 @@ impl KlipperStatus {
                 sender
                     .send(KlipperMessage::Position(pos))
                     .map_err(|e| anyhow!("Failed to send position message: {:?}", e))?;
-                self.position = Some(pos);
+                if gcode_pos {
+                    self.gcode_position = Some(pos);
+                } else {
+                    self.position = Some(pos);
+                }
                 self.last_position_update = Instant::now();
             }
             _ => {
                 error!("Invalid gcode_position: {:?}", pos);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn _update_homing_origin(
+        &mut self,
+        sender: &UiInboxSender<KlipperMessage>,
+        pos: &serde_json::Value,
+    ) -> Result<()> {
+        match (pos[0].as_f64(), pos[1].as_f64(), pos[2].as_f64()) {
+            (Some(x), Some(y), Some(z)) => {
+                self.homing_origin = (x, y, z);
+                sender
+                    .send(KlipperMessage::HomingOriginChanged((x, y, z)))
+                    .map_err(|e| anyhow!("Failed to send homing origin message: {:?}", e))?;
+            }
+            _ => {
+                error!("Invalid homing_origin: {:?}", pos);
             }
         }
 
@@ -138,16 +92,52 @@ impl KlipperStatus {
     ) -> Result<()> {
         // debug!("updating status");
 
+        // #[cfg(feature = "nope")]
+        if let Some(data) = json.pointer("/result/status/toolhead") {
+            trace!(
+                "Got toolhead data: {}",
+                serde_json::to_string_pretty(data).unwrap()
+            );
+        }
+
+        // #[cfg(feature = "nope")]
+        if let Some(data) = json.pointer("/result/status/gcode_move") {
+            trace!(
+                "Got toolhead data: {}",
+                serde_json::to_string_pretty(data).unwrap()
+            );
+        }
+
         if let Some(stepper_x) = json.pointer("/result/status/configfile/config/stepper_x") {
             self._update_resolution(&stepper_x)?;
         }
 
+        // if let Some(pos) = json.pointer("/result/status/gcode_move/gcode_position") {
+        //     debug!("updating position from gcode");
+        //     self._update_pos(sender, pos)?;
+        // }
+
+        if let Some(pos) = json.pointer("/result/status/gcode_move/position") {
+            // debug!("updating position from gcode");
+            self._update_pos(sender, pos, false)?;
+            // warn!("skipping updating position from gcode");
+        }
+
         if let Some(pos) = json.pointer("/result/status/gcode_move/gcode_position") {
-            self._update_pos(sender, pos)?;
+            // debug!("updating position from gcode");
+            self._update_pos(sender, pos, true)?;
+            // warn!("skipping updating position from gcode");
+        }
+
+        if let Some(pos) = json.pointer("/result/status/gcode_move/homing_origin") {
+            // debug!("TODO: Got homing_origin: {:?}", pos);
+            self._update_homing_origin(sender, pos)?;
         }
 
         if let Some(pos) = json.pointer("/result/status/toolhead/position") {
-            self._update_pos(sender, pos)?;
+            // debug!("updating position from toolhead");
+            // self._update_pos(sender, pos)?;
+            warn!("skipping updating position from toolhead");
         }
 
         let steppers = json.pointer("/result/status/stepper_enable/steppers");
@@ -180,9 +170,9 @@ impl KlipperStatus {
         };
 
         // debug!("updating status");
-        if let Some(pos) = data.get("position") {
-            self._update_pos(sender, pos)?;
-        }
+        // if let Some(pos) = data.get("position") {
+        //     self._update_pos(sender, pos)?;
+        // }
 
         if let Some(axes) = data.get("homed_axes").and_then(|v| v.as_str()) {
             let prev_axes = self.homed_axes;
@@ -305,14 +295,27 @@ impl KlipperConn {
     }
 
     /// toolhead.position is the actual coordinates, before applying tool offsets
+    ///
+    /// gcode_move:
+    ///     homing_origin:    current tool offsets
+    ///     gcode_position:   commanded position (after offset applied)
+    ///     position:         carriage position (before offset applied)
     pub async fn subscribe_to_defaults(&mut self) -> Result<()> {
         let msg = serde_json::json!({
             "jsonrpc": "2.0",
             "method": "printer.objects.subscribe",
             "params": {
                 "objects": {
-                    "gcode_move": ["absolute_coordinates"],
-                    "toolhead": ["position", "status", "homed_axes"],
+                    "gcode_move": [
+                        "homing_origin",
+                        "position",
+                        "gcode_position",
+                        "absolute_coordinates",
+                        ],
+                    // "gcode_move": null,
+                    // "toolhead": ["position", "homed_axes"],
+                    "toolhead": ["homed_axes"],
+                    // "toolhead": null,
                     // "motion_report": null,
                     // "idle_timeout": null,
                     "stepper_enable": null,
@@ -411,6 +414,7 @@ impl KlipperConn {
             KlipperCommand::DisableMotors => self.disable_motors().await,
             KlipperCommand::WaitForMoves => self.wait_for_moves().await,
             KlipperCommand::Dwell(ms) => self.dwell(ms).await,
+            KlipperCommand::FetchPosition => self.query_object("gcode_move").await,
         }
     }
 
@@ -420,13 +424,19 @@ impl KlipperConn {
         inbox: &UiInboxSender<KlipperMessage>,
         msg: tokio_tungstenite::tungstenite::Message,
     ) -> Result<()> {
-        let msg1 = msg.into_text().unwrap();
+        // debug!("handle_message: {:?}", msg);
+
+        let msg1 = msg.clone().into_text().unwrap();
+        if msg1.is_empty() {
+            trace!("Received empty message");
+            return Ok(());
+        }
         let json = serde_json::from_str(msg1.as_str());
 
         let json: serde_json::Value = match json {
             Ok(json) => json,
             Err(e) => {
-                trace!("Failed to parse JSON: {}\n{}", msg1, e);
+                trace!("Failed to parse JSON: {:?}\n{}", msg, e);
                 return Ok(());
             }
         };
@@ -439,7 +449,7 @@ impl KlipperConn {
             // debug!("Received: {}", serde_json::to_string_pretty(&json).unwrap());
             // debug!("got notify_proc_stat_update");
 
-            if let Some(params) = json.pointer("params/0") {
+            if let Some(params) = json.pointer("/params/0") {
                 if params.get("stepper_enabled").is_some() {
                     trace!("got msg: {}", serde_json::to_string_pretty(&json).unwrap());
                 }
@@ -447,7 +457,25 @@ impl KlipperConn {
 
             // return Ok(());
         } else {
-            trace!("got msg: {}", serde_json::to_string_pretty(&json).unwrap());
+            if method == "notify_status_update" {
+                // debug!("Received: {}", serde_json::to_string_pretty(&json).unwrap());
+                if let Some(data) = json.pointer("/params/0").and_then(|v| v.as_object()) {
+                    // if data.len() > 1 {
+                    // }
+
+                    if data.len() == 0 || data.keys().next().map(|s| s == "").unwrap_or(false) {
+                    } else {
+                        trace!("got msg: {}", serde_json::to_string_pretty(&json).unwrap());
+                    }
+                }
+            } else if method == "notify_gcode_response" {
+            } else if method == "notify_filelist_changed" {
+            } else if json.pointer("/result/status/configfile").is_some() {
+                debug!("Got configfile");
+            } else {
+                // debug!("Received: {}", serde_json::to_string_pretty(&json).unwrap());
+                trace!("got msg: {}", serde_json::to_string_pretty(&json).unwrap());
+            }
         }
 
         if let Err(e) = status.write().await.update(&inbox, &json) {
